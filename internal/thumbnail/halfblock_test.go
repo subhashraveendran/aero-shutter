@@ -69,6 +69,67 @@ func testImage() *image.RGBA {
 	return img
 }
 
+func TestBilinearScaleInterpolatesMidpoints(t *testing.T) {
+	// 2x2 checkerboard: black/white over white/black. Upscaling to 3x3 puts
+	// the destination center pixel exactly between all four sources, so it
+	// must interpolate to mid-gray, while the corners map straight onto the
+	// source pixels.
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	img.Set(0, 0, color.RGBA{0, 0, 0, 255})
+	img.Set(1, 0, color.RGBA{255, 255, 255, 255})
+	img.Set(0, 1, color.RGBA{255, 255, 255, 255})
+	img.Set(1, 1, color.RGBA{0, 0, 0, 255})
+
+	px := bilinearScale(img, 3, 3)
+	if len(px) != 9 {
+		t.Fatalf("got %d pixels, want 9", len(px))
+	}
+	if px[0] != (rgb{0, 0, 0}) {
+		t.Errorf("top-left = %v, want black", px[0])
+	}
+	if px[2] != (rgb{255, 255, 255}) {
+		t.Errorf("top-right = %v, want white", px[2])
+	}
+	center := px[4]
+	for _, ch := range []uint8{center.r, center.g, center.b} {
+		if ch < 126 || ch > 129 {
+			t.Errorf("center channel = %d, want ~127 (bilinear midpoint)", ch)
+		}
+	}
+	// Edge midpoints sit halfway between two sources horizontally: the top
+	// middle pixel blends black and white to mid-gray too.
+	top := px[1]
+	if top.r < 126 || top.r > 129 {
+		t.Errorf("top-middle = %v, want ~127 gray", top)
+	}
+}
+
+func TestScalePixelsChoosesFilter(t *testing.T) {
+	// A 2x1 black|white image upscaled to 4x1 must show interpolated
+	// intermediate values (bilinear), not duplicated blocks (nearest).
+	img := image.NewRGBA(image.Rect(0, 0, 2, 1))
+	img.Set(0, 0, color.RGBA{0, 0, 0, 255})
+	img.Set(1, 0, color.RGBA{255, 255, 255, 255})
+	px := scalePixels(img, 4, 1)
+	if px[1].r == px[0].r || px[1].r == px[3].r {
+		t.Errorf("upscale not interpolated: %v", px)
+	}
+	if px[1].r >= px[2].r {
+		t.Errorf("gradient not monotonic: %v", px)
+	}
+	// Downscaling still box-averages: a 2x2 black/white checker reduced to
+	// 1x1 averages to mid-gray.
+	checker := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	checker.Set(0, 0, color.RGBA{0, 0, 0, 255})
+	checker.Set(1, 0, color.RGBA{255, 255, 255, 255})
+	checker.Set(0, 1, color.RGBA{255, 255, 255, 255})
+	checker.Set(1, 1, color.RGBA{0, 0, 0, 255})
+	avg := scalePixels(checker, 1, 1)
+	if avg[0].r < 126 || avg[0].r > 129 {
+		t.Errorf("downscale average = %v, want ~127 gray", avg[0])
+	}
+}
+
 func TestRenderHalfBlockImageTruecolor(t *testing.T) {
 	out := renderHalfBlockImage(testImage(), 2, 2, true)
 	lines := strings.Split(out, "\n")

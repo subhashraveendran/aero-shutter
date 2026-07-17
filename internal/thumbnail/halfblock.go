@@ -41,6 +41,73 @@ func ansi256(r, g, b uint8) int {
 	return 16 + 36*q(r) + 6*q(g) + q(b)
 }
 
+// scalePixels resizes img to w x h pixels, choosing the right filter for the
+// direction: box averaging when downscaling (each destination pixel is the
+// mean of its source box, which is correct for reduction) and bilinear
+// interpolation when upscaling in either dimension (which produces smooth
+// gradients instead of blocky nearest-neighbor artifacts).
+func scalePixels(img image.Image, w, h int) []rgb {
+	bounds := img.Bounds()
+	if w > bounds.Dx() || h > bounds.Dy() {
+		return bilinearScale(img, w, h)
+	}
+	return boxScale(img, w, h)
+}
+
+// bilinearScale resizes img to w x h pixels using bilinear interpolation:
+// each destination pixel samples the four nearest source pixels weighted by
+// distance. Used when upscaling. No external deps.
+func bilinearScale(img image.Image, w, h int) []rgb {
+	bounds := img.Bounds()
+	srcW, srcH := bounds.Dx(), bounds.Dy()
+	out := make([]rgb, w*h)
+	sample := func(x, y int) (float64, float64, float64) {
+		if x < 0 {
+			x = 0
+		}
+		if x > srcW-1 {
+			x = srcW - 1
+		}
+		if y < 0 {
+			y = 0
+		}
+		if y > srcH-1 {
+			y = srcH - 1
+		}
+		r, g, b, _ := img.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
+		return float64(r >> 8), float64(g >> 8), float64(b >> 8)
+	}
+	for y := 0; y < h; y++ {
+		// Map the destination pixel center back into source coordinates.
+		fy := (float64(y)+0.5)*float64(srcH)/float64(h) - 0.5
+		y0 := int(fy)
+		if fy < 0 {
+			y0 = -1
+		}
+		wy := fy - float64(y0)
+		for x := 0; x < w; x++ {
+			fx := (float64(x)+0.5)*float64(srcW)/float64(w) - 0.5
+			x0 := int(fx)
+			if fx < 0 {
+				x0 = -1
+			}
+			wx := fx - float64(x0)
+
+			r00, g00, b00 := sample(x0, y0)
+			r10, g10, b10 := sample(x0+1, y0)
+			r01, g01, b01 := sample(x0, y0+1)
+			r11, g11, b11 := sample(x0+1, y0+1)
+
+			lerp := func(a, b, t float64) float64 { return a + (b-a)*t }
+			r := lerp(lerp(r00, r10, wx), lerp(r01, r11, wx), wy)
+			g := lerp(lerp(g00, g10, wx), lerp(g01, g11, wx), wy)
+			bl := lerp(lerp(b00, b10, wx), lerp(b01, b11, wx), wy)
+			out[y*w+x] = rgb{uint8(r + 0.5), uint8(g + 0.5), uint8(bl + 0.5)}
+		}
+	}
+	return out
+}
+
 // boxScale downsamples img to w x h pixels by averaging each source box
 // (falling back to nearest-neighbor when upscaling). No external deps.
 func boxScale(img image.Image, w, h int) []rgb {
@@ -116,7 +183,7 @@ func renderHalfBlockImage(img image.Image, cols, rows int, truecolor bool) strin
 	if w == 0 || h == 0 {
 		return ""
 	}
-	px := boxScale(img, w, h)
+	px := scalePixels(img, w, h)
 	indent := strings.Repeat(" ", (cols-w)/2) // center inside the cell box
 
 	var b strings.Builder

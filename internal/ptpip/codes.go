@@ -80,6 +80,11 @@ const (
 	OpGetThumb         OpCode = 0x100A
 	OpGetDevicePropVal OpCode = 0x1015
 	OpGetPartialObject OpCode = 0x101B
+
+	// OpNikonGetLargeThumb is the Nikon vendor operation returning a larger
+	// (~640px) JPEG preview than the standard GetThumb thumbnail. Not every
+	// body supports it; callers must fall back to OpGetThumb on a PTP error.
+	OpNikonGetLargeThumb OpCode = 0x90C4
 )
 
 // ResponseCode is a PTP response code returned in an OperationResponse.

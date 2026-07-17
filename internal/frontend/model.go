@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -54,6 +55,11 @@ type Model struct {
 	connecting bool
 	connectErr string
 
+	// Camera picker (shown when more than one camera is available).
+	picker       bool
+	pickerItems  []pickerItem
+	pickerCursor int
+
 	// Browser state.
 	files      []camera.File
 	imported   map[string]bool
@@ -89,6 +95,10 @@ type Model struct {
 	setOpen   bool
 	setFocus  int
 
+	// Mouse double-click tracking.
+	lastClickRow  int
+	lastClickTime time.Time
+
 	// Toasts.
 	toast    string
 	toastErr bool
@@ -120,29 +130,38 @@ func New(cfg config.Config, db *database.DB) Model {
 	}
 
 	return Model{
-		cfg:       cfg,
-		db:        db,
-		cam:       cam,
-		thumbs:    thumbnail.NewFetcher(cam, thumbnail.DefaultCacheSize),
-		proto:     thumbnail.DetectProtocol(),
-		screen:    screenConnect,
-		spin:      sp,
-		ipInput:   ip,
-		prog:      pr,
-		battery:   -1,
-		selected:  map[uint32]bool{},
-		imported:  map[string]bool{},
-		setInputs: setInputs,
+		cfg:          cfg,
+		db:           db,
+		cam:          cam,
+		thumbs:       thumbnail.NewFetcher(cam, thumbnail.DefaultCacheSize),
+		proto:        thumbnail.ProtocolFromMode(cfg.PreviewMode),
+		screen:       screenConnect,
+		spin:         sp,
+		ipInput:      ip,
+		prog:         pr,
+		battery:      -1,
+		selected:     map[uint32]bool{},
+		imported:     map[string]bool{},
+		setInputs:    setInputs,
+		lastClickRow: -1,
 	}
 }
 
 // Init starts auto-detection on launch.
 func (m Model) Init() tea.Cmd {
 	m.detecting = true
-	return tea.Batch(
-		m.spin.Tick,
-		detectCmd(m.cfg.CameraIP, m.cfg.LastConnected, camera.D5300Profile.DefaultIP),
-	)
+	return tea.Batch(m.spin.Tick, detectCmd(m.detectCandidates()...))
+}
+
+// detectCandidates lists the addresses probed before the subnet scan: the
+// configured IP, the last connected address, every saved camera and the
+// factory default.
+func (m Model) detectCandidates() []string {
+	cand := []string{m.cfg.CameraIP, m.cfg.LastConnected}
+	for _, sc := range m.cfg.Cameras {
+		cand = append(cand, sc.IP)
+	}
+	return append(cand, camera.D5300Profile.DefaultIP)
 }
 
 // Update routes messages to the active screen.
@@ -217,7 +236,13 @@ func (m Model) showToast(text string, isErr bool) (tea.Model, tea.Cmd) {
 
 func (m Model) updateConnect(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		return m.connectMouse(msg)
+
 	case tea.KeyMsg:
+		if m.picker {
+			return m.pickerKey(msg)
+		}
 		switch msg.String() {
 		case "q":
 			if !m.ipInput.Focused() {
@@ -236,9 +261,7 @@ func (m Model) updateConnect(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.spin.Tick, connectCmd(m.cam, addr))
 		case "d":
 			if !m.ipInput.Focused() {
-				m.detecting = true
-				m.connectErr = ""
-				return m, tea.Batch(m.spin.Tick, detectCmd(m.cfg.CameraIP, m.cfg.LastConnected, camera.D5300Profile.DefaultIP))
+				return m.startDetect()
 			}
 		case "tab", "m", "i":
 			if !m.ipInput.Focused() {
@@ -249,14 +272,21 @@ func (m Model) updateConnect(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ipInput, cmd = m.ipInput.Update(msg)
 		return m, cmd
 
-	case detectedMsg:
+	case discoveredMsg:
 		m.detecting = false
 		if msg.err != nil {
 			m.connectErr = msg.err.Error()
 			return m, m.ipInput.Focus()
 		}
-		m.connecting = true
-		return m, tea.Batch(m.spin.Tick, connectCmd(m.cam, msg.addr))
+		if len(msg.cams) == 1 {
+			m.connecting = true
+			return m, tea.Batch(m.spin.Tick, connectCmd(m.cam, msg.cams[0].Addr))
+		}
+		m.pickerItems = buildPicker(m.cfg.Cameras, msg.cams)
+		m.pickerCursor = firstAvailable(m.pickerItems)
+		m.picker = true
+		m.ipInput.Blur()
+		return m, nil
 
 	case connectedMsg:
 		m.connecting = false
@@ -264,8 +294,15 @@ func (m Model) updateConnect(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.connectErr = msg.err.Error()
 			return m, m.ipInput.Focus()
 		}
+		info := m.cam.DeviceInfo()
+		name := info.Model
+		if name == "" {
+			name = m.cam.Profile().Name
+		}
+		m.cfg.UpsertCamera(name, msg.addr, info.Serial, time.Now())
 		m.cfg.LastConnected = msg.addr
 		_ = config.Save(m.cfg)
+		m.picker = false
 		m.screen = screenBrowser
 		m.refreshing = true
 		var cmds []tea.Cmd
@@ -275,12 +312,59 @@ func (m Model) updateConnect(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// pickerKey handles keys while the camera picker is shown.
+func (m Model) pickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m.quit()
+	case "esc", "m", "tab":
+		m.picker = false
+		return m, m.ipInput.Focus()
+	case "up", "k":
+		if m.pickerCursor > 0 {
+			m.pickerCursor--
+		}
+	case "down", "j":
+		if m.pickerCursor < len(m.pickerItems)-1 {
+			m.pickerCursor++
+		}
+	case "enter":
+		return m.pickerConnect()
+	case "d":
+		m.picker = false
+		return m.startDetect()
+	}
+	return m, nil
+}
+
+// pickerConnect connects to the camera under the picker cursor.
+func (m Model) pickerConnect() (tea.Model, tea.Cmd) {
+	if m.pickerCursor < 0 || m.pickerCursor >= len(m.pickerItems) {
+		return m, nil
+	}
+	it := m.pickerItems[m.pickerCursor]
+	m.picker = false
+	m.connecting = true
+	m.connectErr = ""
+	return m, tea.Batch(m.spin.Tick, connectCmd(m.cam, it.addr))
+}
+
+// startDetect kicks off a fresh camera scan.
+func (m Model) startDetect() (tea.Model, tea.Cmd) {
+	m.detecting = true
+	m.connectErr = ""
+	return m, tea.Batch(m.spin.Tick, detectCmd(m.detectCandidates()...))
+}
+
 // ---- Browser screen ----------------------------------------------------
 
 func (m Model) updateBrowser(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return m.browserKey(msg)
+
+	case tea.MouseMsg:
+		return m.browserMouse(msg)
 
 	case refreshMsg:
 		m.refreshing = false
@@ -440,6 +524,11 @@ func (m Model) browserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.showToast("file not imported yet", false)
 		}
 		return m, nil
+	case "c":
+		if m.importing {
+			return m.showToast("finish or cancel the import first", false)
+		}
+		return m.switchCamera()
 	case "w":
 		m.watch = !m.watch
 		if m.watch {
@@ -450,6 +539,28 @@ func (m Model) browserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.showToast("watch mode off", false)
 	}
 	return m, nil
+}
+
+// switchCamera cleanly disconnects the current camera and returns to the
+// connect screen with a fresh scan, so another body can be picked. Only one
+// camera is connected at a time.
+func (m Model) switchCamera() (tea.Model, tea.Cmd) {
+	if m.cam.Connected() {
+		_ = m.cam.Disconnect()
+	}
+	// Thumbnail handles are camera-specific; drop the cache with the link.
+	m.thumbs = thumbnail.NewFetcher(m.cam, thumbnail.DefaultCacheSize)
+	m.files = nil
+	m.imported = map[string]bool{}
+	m.storages = nil
+	m.selected = map[uint32]bool{}
+	m.battery = -1
+	m.cursor, m.offset = 0, 0
+	m.thumbHandle, m.thumbData = 0, nil
+	m.watch = false
+	m.previewOverlay, m.detailOverlay = false, false
+	m.screen = screenConnect
+	return m.startDetect()
 }
 
 func (m *Model) startImport(filter importer.Filter) tea.Cmd {
@@ -705,9 +816,10 @@ func humanSpeed(bps float64) string {
 	return humanBytes(int64(bps)) + "/s"
 }
 
-// Run starts the Bubble Tea program in the alternate screen.
+// Run starts the Bubble Tea program in the alternate screen with mouse
+// support (wheel scrolling, row clicks, help-bar shortcuts).
 func Run(cfg config.Config, db *database.DB) error {
-	p := tea.NewProgram(New(cfg, db), tea.WithAltScreen())
+	p := tea.NewProgram(New(cfg, db), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
 }

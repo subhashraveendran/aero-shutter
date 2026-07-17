@@ -76,6 +76,9 @@ const connectNote = "Joining the camera's Wi-Fi disconnects normal internet — 
 	"use Ethernet or a USB Wi-Fi adapter to stay online."
 
 func (m Model) viewConnect() string {
+	if m.picker {
+		return m.viewPicker()
+	}
 	var sections []string
 
 	// Wordmark with a vertical gradient; plain title on narrow terminals.
@@ -182,10 +185,7 @@ func (m Model) viewBody() string {
 	if bodyH < 5 {
 		bodyH = 5
 	}
-	listW := m.width * 55 / 100
-	if listW < 30 {
-		listW = min(30, m.width-2)
-	}
+	listW := m.listPaneWidth()
 	prevW := m.width - listW
 	if prevW < 20 {
 		prevW = 20
@@ -376,10 +376,12 @@ func (m Model) viewBottomBar() string {
 	return lipgloss.JoinVertical(lipgloss.Left, "", status, toast)
 }
 
+// helpText is the browser help bar. The footer hit zones in mouse.go are
+// computed from this same string, so the two always stay in sync.
+const helpText = "q quit · r refresh · i import new · a import all · space select · S import selected · f filter · P preview · D details · O open · s settings · c camera · w watch"
+
 func (m Model) viewHelp() string {
-	return styleHelp.MaxWidth(m.width).Render(
-		"q quit · r refresh · i import new · a import all · space select · S import selected · f filter · P preview · D details · O open · s settings · w watch",
-	)
+	return styleHelp.MaxWidth(m.width).Render(helpText)
 }
 
 // ---- Overlays ----------------------------------------------------------

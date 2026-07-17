@@ -2,10 +2,12 @@ package camera
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"sort"
+	"sync/atomic"
 	"time"
 
 	"github.com/subhashraveendran/aero-shutter/internal/ptpip"
@@ -44,6 +46,10 @@ type Camera struct {
 	profile Profile
 	info    Info
 	addr    string
+
+	// largeThumbFailed remembers, per session, that the body rejected the
+	// Nikon GetLargeThumb vendor operation so it is never retried.
+	largeThumbFailed atomic.Bool
 }
 
 // New creates a disconnected Camera.
@@ -74,6 +80,7 @@ func (c *Camera) Connect(ctx context.Context, addr string) error {
 		// Trust the camera's advertised operation set over the profile.
 		c.profile.SupportsPartialObject = false
 	}
+	c.largeThumbFailed.Store(false) // new session: allow a fresh attempt
 	return nil
 }
 
@@ -165,13 +172,39 @@ func (c *Camera) ListFiles(ctx context.Context) ([]File, error) {
 	return files, nil
 }
 
-// GetThumb returns the embedded JPEG thumbnail for a handle, or nil when the
-// profile disables thumbnails.
+// GetThumb returns the best available JPEG preview for a handle, or nil when
+// the profile disables thumbnails. When the profile enables LargeThumb the
+// Nikon GetLargeThumb vendor operation (0x90C4) is tried first; a PTP error
+// (e.g. OperationNotSupported) marks it unavailable for the rest of the
+// session and the standard GetThumb (0x100A) is used instead.
 func (c *Camera) GetThumb(ctx context.Context, handle uint32) ([]byte, error) {
 	if c.profile.Thumbnails == ThumbNone {
 		return nil, nil
 	}
-	return c.client.GetThumb(ctx, handle)
+	return fetchThumb(ctx, handle, c.profile.LargeThumb, &c.largeThumbFailed,
+		c.client.GetLargeThumb, c.client.GetThumb)
+}
+
+// thumbFetchFunc fetches preview bytes for an object handle.
+type thumbFetchFunc func(ctx context.Context, handle uint32) ([]byte, error)
+
+// fetchThumb implements the LargeThumb fallback state machine: try the large
+// variant while it is enabled and not yet known to fail, permanently disable
+// it for the session on a PTP error, and propagate transport errors (which
+// say nothing about opcode support) unchanged.
+func fetchThumb(ctx context.Context, handle uint32, tryLarge bool, failed *atomic.Bool, large, std thumbFetchFunc) ([]byte, error) {
+	if tryLarge && !failed.Load() {
+		data, err := large(ctx, handle)
+		if err == nil {
+			return data, nil
+		}
+		var pe *ptpip.PTPError
+		if !errors.As(err, &pe) {
+			return nil, err
+		}
+		failed.Store(true)
+	}
+	return std(ctx, handle)
 }
 
 // ProgressFunc receives the total number of bytes written so far (including

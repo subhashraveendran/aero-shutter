@@ -16,6 +16,7 @@ func TestDetectProtocol(t *testing.T) {
 		{"wezterm", map[string]string{"TERM_PROGRAM": "WezTerm"}, ProtocolKitty},
 		{"ghostty", map[string]string{"TERM_PROGRAM": "ghostty"}, ProtocolKitty},
 		{"iterm2", map[string]string{"TERM_PROGRAM": "iTerm.app"}, ProtocolITerm2},
+		{"vscode", map[string]string{"TERM_PROGRAM": "vscode"}, ProtocolITerm2},
 		{"plain xterm", map[string]string{"TERM": "xterm-256color"}, ProtocolHalfBlock},
 		{"empty env", nil, ProtocolHalfBlock},
 	}
@@ -23,6 +24,32 @@ func TestDetectProtocol(t *testing.T) {
 		getenv := func(k string) string { return tc.env[k] }
 		if got := detectProtocol(getenv); got != tc.want {
 			t.Errorf("%s: detectProtocol = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestProtocolFromMode(t *testing.T) {
+	vscodeEnv := func(k string) string {
+		if k == "TERM_PROGRAM" {
+			return "vscode"
+		}
+		return ""
+	}
+	cases := []struct {
+		mode string
+		want Protocol
+	}{
+		{"kitty", ProtocolKitty},
+		{"iterm2", ProtocolITerm2},
+		{"halfblock", ProtocolHalfBlock},
+		{" HalfBlock ", ProtocolHalfBlock},
+		{"auto", ProtocolITerm2}, // falls through to detection (vscode env)
+		{"", ProtocolITerm2},
+		{"garbage", ProtocolITerm2},
+	}
+	for _, tc := range cases {
+		if got := protocolFromMode(tc.mode, vscodeEnv); got != tc.want {
+			t.Errorf("protocolFromMode(%q) = %v, want %v", tc.mode, got, tc.want)
 		}
 	}
 }

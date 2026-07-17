@@ -415,6 +415,18 @@ func (c *Client) GetThumb(ctx context.Context, handle uint32) ([]byte, error) {
 	return buf.b, nil
 }
 
+// GetLargeThumb fetches a larger JPEG preview for a handle using the Nikon
+// vendor operation 0x90C4. Bodies that do not implement it answer with a PTP
+// error (typically OperationNotSupported); callers should then fall back to
+// GetThumb.
+func (c *Client) GetLargeThumb(ctx context.Context, handle uint32) ([]byte, error) {
+	var buf memBuffer
+	if _, err := c.Transact(ctx, OpNikonGetLargeThumb, []uint32{handle}, nil, &buf); err != nil {
+		return nil, err
+	}
+	return buf.b, nil
+}
+
 // GetObject streams the full object for a handle to w.
 func (c *Client) GetObject(ctx context.Context, handle uint32, w io.Writer) error {
 	_, err := c.Transact(ctx, OpGetObject, []uint32{handle}, nil, w)

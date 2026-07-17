@@ -42,10 +42,17 @@ terminal UI in the spirit of lazygit and btop.
   on capture date (configurable).
 - **Thumbnails in your terminal** — embedded JPEG previews rendered inline via
   the Kitty graphics protocol (Kitty, WezTerm, Ghostty) or iTerm2 inline
-  images, with an ANSI half-block renderer as a universal fallback so
-  previews work in every color terminal, including macOS Terminal.app.
-- **Auto-detection** — probes the D5300's default address and quickly scans
-  your local /24 for a camera when it isn't there.
+  images (iTerm2, mintty, VS Code), with a bilinear-scaled ANSI half-block
+  renderer as a universal fallback so previews work in every color terminal,
+  including macOS Terminal.app. On Nikon bodies that support it, the larger
+  vendor preview (GetLargeThumb) is fetched automatically for a sharper image.
+- **Mouse support** — scroll the file list with the wheel, click rows to move
+  the cursor, click again to select, double-click for the large preview, and
+  click the help-bar shortcuts.
+- **Multiple cameras** — the scan finds every camera on your subnets; a picker
+  lists saved and discovered bodies, and `c` switches cameras at any time.
+- **Auto-detection** — probes the configured/default addresses and quickly
+  scans your local /24 for cameras when they aren't there.
 - **Watch mode** — poll the camera every 5 seconds and (optionally)
   auto-import new shots as you take them.
 - **Filters & selection** — import everything, only new files, only RAW, only
@@ -115,6 +122,15 @@ aero-shutter -version   # print the version
 Settings (save folder, camera IP, auto-import, open-after-import) live in
 `<user config dir>/aero-shutter/config.json` and are editable in-app with `s`.
 
+The config file also holds `preview_mode` (`"auto"`, `"halfblock"`,
+`"iterm2"` or `"kitty"`) and the list of saved cameras (`cameras`), which is
+updated automatically on every successful connection.
+
+> **Blocky previews in VS Code?** The integrated terminal supports inline
+> images, but only when **Terminal › Integrated: Enable Images** is turned on
+> in the VS Code settings. Enable it for sharp previews, or set
+> `"preview_mode": "halfblock"` in `config.json` to force the text renderer.
+
 ## Keybindings
 
 | Key      | Action                                        |
@@ -131,9 +147,24 @@ Settings (save folder, camera IP, auto-import, open-after-import) live in
 | `D`      | metadata detail overlay                       |
 | `O`      | open the imported file with the OS viewer     |
 | `s`      | settings                                      |
+| `c`      | switch camera (disconnect, back to picker)    |
 | `w`      | toggle watch mode (poll camera every 5s)      |
 | `x`/`esc`| cancel a running import                       |
 | `↑↓`/`jk`| move the cursor                               |
+
+### Mouse
+
+| Gesture               | Action                                                  |
+| --------------------- | ------------------------------------------------------- |
+| wheel up/down         | scroll the file list (3 rows per notch)                 |
+| click on a row        | move the cursor to that row                             |
+| click on the cursor row | toggle its selection checkbox (same as `space`)       |
+| double-click on a row | open the large preview overlay (same as `P`)            |
+| click in an overlay   | close the overlay                                       |
+| click a help-bar label | trigger that shortcut (`q`, `r`, `i`, `a`, `f`, `s`, `c`) |
+
+On the connect screen the camera picker is mouse-aware too: click an entry to
+connect, scroll to move the selection.
 
 ## How it works
 
@@ -168,11 +199,14 @@ support, thumbnail strategy, chunk size). The importer and UI only talk to the
 profile-driven `Camera` type, so supporting another body is a matter of adding
 a profile.
 
+Profiles ship for the D5200, D5300, D5500, D5600, D7100, D7200, D500, D750,
+D850, Z50, Z6 and Z7; anything else falls back to a conservative generic
+PTP/IP profile.
+
 ## Roadmap
 
-- Profiles for more Wi-Fi capable Nikon bodies (D7200, D500, Z series via
-  their PTP/IP dialects)
 - Parallel downloads for cameras whose Wi-Fi can sustain them
+- Simultaneous imports from multiple cameras
 - EXIF-based organization rules and custom naming templates
 - Optional checksum verification after transfer
 

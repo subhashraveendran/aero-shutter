@@ -90,7 +90,35 @@ func detectProtocol(getenv func(string) string) Protocol {
 	if prog == "mintty" {
 		return ProtocolITerm2
 	}
+	// VS Code's integrated terminal supports the iTerm2 OSC 1337 protocol
+	// when the "terminal.integrated.enableImages" setting is on. The setting
+	// cannot be detected from the environment; users who left it off can
+	// force the half-block renderer via the previewMode config field.
+	if prog == "vscode" {
+		return ProtocolITerm2
+	}
 	return ProtocolHalfBlock
+}
+
+// ProtocolFromMode resolves the previewMode configuration value: "kitty",
+// "iterm2" and "halfblock" force that protocol, while "auto" (or any other
+// value) falls back to environment detection via DetectProtocol.
+func ProtocolFromMode(mode string) Protocol {
+	return protocolFromMode(mode, os.Getenv)
+}
+
+// protocolFromMode is the testable core of ProtocolFromMode.
+func protocolFromMode(mode string, getenv func(string) string) Protocol {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "kitty":
+		return ProtocolKitty
+	case "iterm2":
+		return ProtocolITerm2
+	case "halfblock":
+		return ProtocolHalfBlock
+	default:
+		return detectProtocol(getenv)
+	}
 }
 
 // kittyChunkSize is the maximum base64 payload per Kitty APC chunk.

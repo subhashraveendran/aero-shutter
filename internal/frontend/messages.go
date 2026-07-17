@@ -14,9 +14,10 @@ import (
 	"github.com/subhashraveendran/aero-shutter/internal/thumbnail"
 )
 
-// detectedMsg reports the result of camera auto-detection.
-type detectedMsg struct {
-	addr string
+// discoveredMsg reports the result of camera auto-detection: every reachable
+// camera on the local subnets plus the configured addresses.
+type discoveredMsg struct {
+	cams []camera.Discovered
 	err  error
 }
 
@@ -59,13 +60,14 @@ type toastClearMsg struct{ id int }
 // openedMsg reports the result of opening a file with the OS handler.
 type openedMsg struct{ err error }
 
-// detectCmd probes candidate addresses and local subnets for a camera.
+// detectCmd probes candidate addresses and local subnets, returning every
+// reachable camera with its model name.
 func detectCmd(candidates ...string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		addr, err := camera.Detect(ctx, candidates...)
-		return detectedMsg{addr: addr, err: err}
+		cams, err := camera.DetectAll(ctx, candidates...)
+		return discoveredMsg{cams: cams, err: err}
 	}
 }
 

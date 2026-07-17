@@ -35,21 +35,33 @@ type Profile struct {
 	SupportsPartialObject bool
 	// Thumbnails selects the thumbnail strategy.
 	Thumbnails ThumbnailStrategy
+	// LargeThumb enables an attempt at the Nikon vendor operation 0x90C4
+	// (GetLargeThumb, a ~640px JPEG). Bodies that reject it fall back to the
+	// standard GetThumb automatically for the rest of the session.
+	LargeThumb bool
 	// ChunkSize is the GetPartialObject chunk size in bytes.
 	ChunkSize uint32
 }
 
+// nikonWiFiProfile builds the profile shared by Wi-Fi capable Nikon bodies:
+// self-assigned 192.168.1.1, PTP/IP on port 15740, resumable chunked
+// downloads and large-thumbnail previews with graceful degradation.
+func nikonWiFiProfile(name, match string) Profile {
+	return Profile{
+		Name:                  name,
+		ModelMatch:            match,
+		DefaultIP:             "192.168.1.1",
+		Port:                  15740,
+		SupportsPartialObject: true,
+		Thumbnails:            ThumbGetThumb,
+		LargeThumb:            true,
+		ChunkSize:             1 << 20, // 1 MiB
+	}
+}
+
 // D5300Profile is the capability profile for the Nikon D5300. When the D5300
 // hosts its own network it assigns itself 192.168.1.1.
-var D5300Profile = Profile{
-	Name:                  "Nikon D5300",
-	ModelMatch:            "D5300",
-	DefaultIP:             "192.168.1.1",
-	Port:                  15740,
-	SupportsPartialObject: true,
-	Thumbnails:            ThumbGetThumb,
-	ChunkSize:             1 << 20, // 1 MiB
-}
+var D5300Profile = nikonWiFiProfile("Nikon D5300", "D5300")
 
 // GenericProfile is a conservative fallback used when the reported model does
 // not match any known profile.
@@ -63,8 +75,24 @@ var GenericProfile = Profile{
 	ChunkSize:             1 << 20,
 }
 
-// Profiles lists all known camera profiles, most specific first.
-var Profiles = []Profile{D5300Profile}
+// Profiles lists all known camera profiles, most specific first. Four-digit
+// models precede D500 so that substring matching never picks the shorter
+// name; Z-series matches use the spaced form ("Z 6") that Nikon reports in
+// DeviceInfo.
+var Profiles = []Profile{
+	nikonWiFiProfile("Nikon D5200", "D5200"),
+	D5300Profile,
+	nikonWiFiProfile("Nikon D5500", "D5500"),
+	nikonWiFiProfile("Nikon D5600", "D5600"),
+	nikonWiFiProfile("Nikon D7100", "D7100"),
+	nikonWiFiProfile("Nikon D7200", "D7200"),
+	nikonWiFiProfile("Nikon D750", "D750"),
+	nikonWiFiProfile("Nikon D850", "D850"),
+	nikonWiFiProfile("Nikon D500", "D500"),
+	nikonWiFiProfile("Nikon Z50", "Z 50"),
+	nikonWiFiProfile("Nikon Z6", "Z 6"),
+	nikonWiFiProfile("Nikon Z7", "Z 7"),
+}
 
 // ProfileForModel returns the profile matching the reported model string,
 // falling back to GenericProfile.

@@ -8,7 +8,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 )
+
+// SavedCamera records a camera that has successfully connected before, so it
+// can be offered in the picker even when it is not currently reachable.
+type SavedCamera struct {
+	// Name is the camera model string, e.g. "NIKON D5300".
+	Name string `json:"name"`
+	// IP is the address (host or host:port) the camera was last reached on.
+	IP string `json:"ip"`
+	// Serial is the camera serial number used to recognise the same body on
+	// a different address.
+	Serial string `json:"serial,omitempty"`
+	// LastSeen is when the camera last connected successfully.
+	LastSeen time.Time `json:"last_seen"`
+}
 
 // Config holds all persisted settings.
 type Config struct {
@@ -25,6 +41,31 @@ type Config struct {
 	ConcurrentDownloads int `json:"concurrent_downloads"`
 	// LastConnected is the address of the camera we last spoke to.
 	LastConnected string `json:"last_connected"`
+	// PreviewMode selects the terminal preview renderer: "auto" (detect from
+	// the environment), "halfblock", "iterm2" or "kitty".
+	PreviewMode string `json:"preview_mode"`
+	// Cameras lists every camera that has connected successfully, newest
+	// first.
+	Cameras []SavedCamera `json:"cameras,omitempty"`
+}
+
+// UpsertCamera records a successful connection, matching an existing entry by
+// serial number first and address second, and moves it to the front of the
+// list.
+func (c *Config) UpsertCamera(name, ip, serial string, now time.Time) {
+	entry := SavedCamera{Name: name, IP: ip, Serial: serial, LastSeen: now}
+	kept := make([]SavedCamera, 0, len(c.Cameras)+1)
+	kept = append(kept, entry)
+	for _, sc := range c.Cameras {
+		if serial != "" && sc.Serial == serial {
+			continue
+		}
+		if sc.IP == ip {
+			continue
+		}
+		kept = append(kept, sc)
+	}
+	c.Cameras = kept
 }
 
 // Default returns the configuration used when no file exists yet.
@@ -39,6 +80,7 @@ func Default() Config {
 		AutoImport:          false,
 		OpenAfterImport:     false,
 		ConcurrentDownloads: 1,
+		PreviewMode:         "auto",
 	}
 }
 
@@ -96,6 +138,9 @@ func Load() (Config, error) {
 	}
 	if cfg.ConcurrentDownloads < 1 {
 		cfg.ConcurrentDownloads = 1
+	}
+	if strings.TrimSpace(cfg.PreviewMode) == "" {
+		cfg.PreviewMode = "auto"
 	}
 	return cfg, nil
 }
