@@ -156,3 +156,87 @@ export const ApertureIcon = ({ size = 24, className }: IconProps) =>
       <line x1="16.62" y1="12" x2="10.88" y2="21.94" />
     </>,
   );
+
+export const ShutterIcon = ({ size = 24, className }: IconProps) =>
+  base(
+    size,
+    className,
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="3" />
+    </>,
+  );
+
+export const ClockIcon = ({ size = 24, className }: IconProps) =>
+  base(
+    size,
+    className,
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 15.5 14" />
+    </>,
+  );
+
+export const TimelapseIcon = ({ size = 24, className }: IconProps) =>
+  base(
+    size,
+    className,
+    <>
+      <path d="M3.5 12a8.5 8.5 0 1 1 2.5 6" />
+      <polyline points="3 20 3 15 8 15" />
+      <polyline points="12 7.5 12 12 15 13.5" />
+    </>,
+  );
+
+export const VideoIcon = ({ size = 24, className }: IconProps) =>
+  base(
+    size,
+    className,
+    <>
+      <rect x="2" y="6" width="13" height="12" rx="2" />
+      <path d="M15 10.5 22 7v10l-7-3.5Z" />
+    </>,
+  );
+
+export const PlayIcon = ({ size = 24, className }: IconProps) =>
+  base(size, className, <polygon points="7 4 20 12 7 20 7 4" />);
+
+export const StopIcon = ({ size = 24, className }: IconProps) =>
+  base(size, className, <rect x="6" y="6" width="12" height="12" rx="2" />);
+
+export const FolderIcon = ({ size = 24, className }: IconProps) =>
+  base(
+    size,
+    className,
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />,
+  );
+
+export const ChevronDown = ({ size = 24, className }: IconProps) =>
+  base(size, className, <polyline points="6 9 12 15 18 9" />);
+
+export const ChevronRight = ({ size = 24, className }: IconProps) =>
+  base(size, className, <polyline points="9 6 15 12 9 18" />);
+
+export const PlusIcon = ({ size = 24, className }: IconProps) =>
+  base(
+    size,
+    className,
+    <>
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </>,
+  );
+
+export const MinusIcon = ({ size = 24, className }: IconProps) =>
+  base(size, className, <line x1="5" y1="12" x2="19" y2="12" />);
+
+export const AlertIcon = ({ size = 24, className }: IconProps) =>
+  base(
+    size,
+    className,
+    <>
+      <path d="M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0Z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </>,
+  );

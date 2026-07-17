@@ -77,19 +77,28 @@ export class PtpIpClient {
   private sessionOpen = false;
   connectionNumber = 0;
   responderName = '';
+  /** How the underlying camera socket was bound to the network. */
+  networkBinding: string | null = null;
 
   constructor(
     private host: string,
     private port: number = PTPIP_PORT,
     private hostName = 'AeroShutter',
+    private bindWifi = true,
   ) {}
 
   async connect(timeoutMs = 8000): Promise<void> {
     const guid = randomGuid();
 
     // Command connection.
-    const cmd = await TcpSocket.connect({ host: this.host, port: this.port, timeoutMs });
+    const cmd = await TcpSocket.connect({
+      host: this.host,
+      port: this.port,
+      timeoutMs,
+      bindWifi: this.bindWifi,
+    });
     this.cmdSocketId = cmd.socketId;
+    this.networkBinding = cmd.networkBinding ?? null;
 
     const dataHandle = await TcpSocket.addListener('data', (e) => {
       if (e.socketId === this.cmdSocketId) this.onCmdData(fromBase64(e.dataB64));
@@ -109,7 +118,12 @@ export class PtpIpClient {
     // Event connection (bound by connection number). Best-effort: some cameras
     // and the mock tolerate its absence, so failures here are non-fatal.
     try {
-      const ev = await TcpSocket.connect({ host: this.host, port: this.port, timeoutMs });
+      const ev = await TcpSocket.connect({
+        host: this.host,
+        port: this.port,
+        timeoutMs,
+        bindWifi: this.bindWifi,
+      });
       this.eventSocketId = ev.socketId;
       await TcpSocket.write({
         socketId: ev.socketId,

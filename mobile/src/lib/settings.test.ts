@@ -8,4 +8,9 @@ describe('settings defaults', () => {
     expect(DEFAULT_SETTINGS.autoImport).toBe(false);
     expect(DEFAULT_SETTINGS.destination).toBe('files');
   });
+
+  it('defaults the Wi-Fi/cellular split and notification flags on', () => {
+    expect(DEFAULT_SETTINGS.keepInternetOnCellular).toBe(true);
+    expect(DEFAULT_SETTINGS.notifyOnImport).toBe(true);
+  });
 });

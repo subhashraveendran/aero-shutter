@@ -6,4 +6,6 @@ CAP_PLUGIN(TcpSocketPlugin, "TcpSocket",
            CAP_PLUGIN_METHOD(connect, CAPPluginReturnPromise);
            CAP_PLUGIN_METHOD(write, CAPPluginReturnPromise);
            CAP_PLUGIN_METHOD(close, CAPPluginReturnPromise);
+           CAP_PLUGIN_METHOD(getWifiInfo, CAPPluginReturnPromise);
+           CAP_PLUGIN_METHOD(getNetworkCapabilities, CAPPluginReturnPromise);
 )

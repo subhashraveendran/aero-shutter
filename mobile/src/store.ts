@@ -13,6 +13,13 @@ import {
   saveSettings,
   type Settings,
 } from './lib/settings';
+import { candidateHosts } from './lib/discovery';
+import { PtpIpClient } from './lib/ptpip/client';
+import {
+  notifyImportComplete,
+  notifyNewPhoto,
+  requestNotificationPermission,
+} from './lib/notifications';
 import * as haptics from './lib/haptics';
 
 export type Screen = 'connect' | 'gallery' | 'detail' | 'import' | 'control' | 'settings';
@@ -40,6 +47,10 @@ interface AppState {
   connecting: boolean;
   connectError: string | null;
   cameraModel: string;
+  /** Human-readable progress during auto-detect, e.g. "Found camera at 192.168.1.1". */
+  connectStatus: string;
+  /** How the camera socket was bound: 'wifi-bound' | 'wifi-pinned' | 'default' | 'unsupported'. */
+  networkBinding: string | null;
 
   settings: Settings;
 
@@ -66,6 +77,9 @@ interface AppState {
   init: () => Promise<void>;
   navigate: (screen: Screen) => void;
   connect: (ip?: string) => Promise<void>;
+  autoConnect: () => Promise<void>;
+  /** Internal: finalize state after a successful handshake + session open. */
+  _onConnected: (host: string) => Promise<void>;
   enterDemo: () => Promise<void>;
   disconnect: () => Promise<void>;
   refreshPhotos: () => Promise<void>;
@@ -94,6 +108,21 @@ function filteredNewCount(photos: Photo[], imported: Set<string>): number {
   return photos.filter((p) => !imported.has(identityKey(p.filename, p.size))).length;
 }
 
+/**
+ * Lightweight reachability probe: open a throwaway PTP/IP connection to `host`,
+ * confirm the handshake, then close it. Resolves if the camera answered,
+ * rejects on timeout / refusal. Used to race candidate addresses.
+ */
+async function probeHost(host: string, timeoutMs: number, bindWifi: boolean): Promise<void> {
+  const client = new PtpIpClient(host, undefined, 'AeroShutter', bindWifi);
+  try {
+    await client.connect(timeoutMs);
+  } finally {
+    // Always release the probe socket; the winner reconnects fresh.
+    await client.close().catch(() => undefined);
+  }
+}
+
 export const useStore = create<AppState>((set, get) => ({
   demo: isDemoMode(),
   screen: 'connect',
@@ -101,6 +130,8 @@ export const useStore = create<AppState>((set, get) => ({
   connecting: false,
   connectError: null,
   cameraModel: '',
+  connectStatus: '',
+  networkBinding: null,
 
   settings: { ...DEFAULT_SETTINGS },
 
@@ -135,19 +166,107 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   async connect(ip) {
-    const host = ip ?? get().settings.cameraIp;
-    set({ connecting: true, connectError: null });
+    // With no explicit ip, auto-detect the camera across candidate addresses.
+    if (ip === undefined) {
+      await get().autoConnect();
+      return;
+    }
+    if (get().connecting || get().connected) return;
+    const bindWifi = get().settings.keepInternetOnCellular;
+    set({ connecting: true, connectError: null, connectStatus: `Connecting to ${ip}…` });
     try {
-      await camera.connect(host);
-      set({ connected: true, connecting: false, cameraModel: camera.cameraModel, screen: 'gallery' });
-      await haptics.success();
-      await get().refreshPhotos();
-      if (get().settings.autoImport && get().settings.watchMode) get().startAutoImport();
+      await camera.connect(ip, undefined, bindWifi);
+      await get()._onConnected(ip);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Could not reach the camera';
-      set({ connecting: false, connectError: message });
+      set({ connecting: false, connectError: message, connectStatus: '' });
       await haptics.warn();
     }
+  },
+
+  async autoConnect() {
+    // Safe to call repeatedly: bail if we're already connecting or connected.
+    if (get().connecting || get().connected) return;
+    set({ connecting: true, connectError: null, connectStatus: 'Searching for camera…' });
+    const bindWifi = get().settings.keepInternetOnCellular;
+
+    let hosts: string[];
+    try {
+      hosts = await candidateHosts(get().settings.cameraIp);
+    } catch {
+      hosts = [get().settings.cameraIp];
+    }
+
+    // Probe candidates concurrently with short timeouts; the first to complete
+    // the PTP/IP handshake wins. Others are cancelled once we have a winner.
+    const PROBE_TIMEOUT = get().demo ? 8000 : 2500;
+    let settled = false;
+
+    const winner = await new Promise<string | null>((resolve) => {
+      let remaining = hosts.length;
+      if (remaining === 0) {
+        resolve(null);
+        return;
+      }
+      for (const host of hosts) {
+        void (async () => {
+          try {
+            await probeHost(host, PROBE_TIMEOUT, bindWifi);
+            if (!settled) {
+              settled = true;
+              set({ connectStatus: `Found camera at ${host}` });
+              resolve(host);
+            }
+          } catch {
+            remaining -= 1;
+            if (remaining === 0 && !settled) {
+              settled = true;
+              resolve(null);
+            }
+          }
+        })();
+      }
+    });
+
+    if (!winner) {
+      set({
+        connecting: false,
+        connectStatus: '',
+        connectError: 'No camera found. Check you are on the camera Wi-Fi, or enter the IP manually.',
+      });
+      await haptics.warn();
+      return;
+    }
+
+    // Establish the real, session-open connection on the winning host.
+    try {
+      await camera.connect(winner, undefined, bindWifi);
+      // Remember the working address for next time.
+      if (winner !== get().settings.cameraIp && !get().demo) {
+        void get().updateSettings({ cameraIp: winner });
+      }
+      await get()._onConnected(winner);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Could not reach the camera';
+      set({ connecting: false, connectError: message, connectStatus: '' });
+      await haptics.warn();
+    }
+  },
+
+  async _onConnected(host: string) {
+    set({
+      connected: true,
+      connecting: false,
+      cameraModel: camera.cameraModel,
+      networkBinding: camera.networkBinding,
+      connectStatus: `Connected to ${camera.cameraModel || host}`,
+      screen: 'gallery',
+    });
+    await haptics.success();
+    // Ask for notification permission up-front so later import events can fire.
+    if (get().settings.notifyOnImport) void requestNotificationPermission();
+    await get().refreshPhotos();
+    if (get().settings.autoImport && get().settings.watchMode) get().startAutoImport();
   },
 
   async enterDemo() {
@@ -166,6 +285,8 @@ export const useStore = create<AppState>((set, get) => ({
       props: [],
       screen: 'connect',
       autoImportTimer: null,
+      connectStatus: '',
+      networkBinding: null,
     });
   },
 
@@ -260,6 +381,10 @@ export const useStore = create<AppState>((set, get) => ({
       return;
     }
     const errors = queue.filter((t) => t.status === 'error').length;
+    const doneCount = queue.filter((t) => t.status === 'done').length;
+    if (get().settings.notifyOnImport && doneCount > 0) {
+      void notifyImportComplete(doneCount);
+    }
     if (errors === 0) {
       await haptics.success();
       get().toast(`Developed ${queue.length} frame${queue.length === 1 ? '' : 's'}`, 'success');
@@ -348,7 +473,10 @@ export const useStore = create<AppState>((set, get) => ({
       const newOnes = fresh.photos.filter(
         (p) => !fresh.importedIds.has(identityKey(p.filename, p.size)),
       );
-      if (newOnes.length > 0) await fresh.importPhotos(newOnes);
+      if (newOnes.length > 0) {
+        if (fresh.settings.notifyOnImport) void notifyNewPhoto(newOnes[0].filename);
+        await fresh.importPhotos(newOnes);
+      }
     }, 5000);
     set({ autoImportTimer: timer });
   },

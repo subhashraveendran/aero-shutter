@@ -45,14 +45,14 @@ type placedButton struct {
 func (m Model) browserToolbar() []toolbarButton {
 	return []toolbarButton{
 		{id: "tb_refresh", icon: "⟳", label: "Refresh", key: "r"},
-		{id: "tb_import_new", icon: "⬇", label: "Import New", key: "i"},
-		{id: "tb_import_all", icon: "⬇⬇", label: "Import All", key: "a"},
-		{id: "tb_select", icon: "⧉", label: "Select", key: " "},
-		{id: "tb_filter", icon: "⛃", label: "Filter: " + filterDisplay(listFilters[m.filterIdx]), key: "f"},
-		{id: "tb_settings", icon: "⚙", label: "Settings", key: "s"},
-		{id: "tb_camera", icon: "🎛", label: "Camera", key: "t"},
+		{id: "tb_import_new", icon: "↓", label: "Import New", key: "i"},
+		{id: "tb_import_all", icon: "⇊", label: "Import All", key: "a"},
+		{id: "tb_select", icon: "⊕", label: "Select", key: " "},
+		{id: "tb_filter", icon: "▤", label: "Filter: " + filterDisplay(listFilters[m.filterIdx]), key: "f"},
+		{id: "tb_settings", icon: "‣", label: "Settings", key: "s"},
+		{id: "tb_camera", icon: "▣", label: "Camera", key: "t"},
 		{id: "tb_help", icon: "?", label: "", key: "?"},
-		{id: "tb_quit", icon: "⏻", label: "Quit", key: "q"},
+		{id: "tb_quit", icon: "", label: "Quit", key: "q"},
 	}
 }
 
@@ -109,20 +109,25 @@ func (m Model) settingsToolbarLayout(y0 int) ([]placedButton, int) {
 	return placed, lines
 }
 
-// connectToolbar returns the buttons for the connect screen.
+// connectToolbar returns the buttons for the connect screen. Automatic
+// detection is the primary path, so the manual-IP affordance is an
+// understated "Advanced" button; it becomes a Cancel/Connect pair only once
+// the user has opened the manual field.
 func (m Model) connectToolbar() []toolbarButton {
-	ipLabel := "Enter IP"
-	ipKey := "tab"
-	if m.ipInput.Focused() {
-		ipLabel = "Cancel IP"
-		ipKey = "esc"
-	}
-	return []toolbarButton{
-		{id: "cn_connect", icon: "⏎", label: "Connect", key: "enter"},
+	btns := []toolbarButton{
 		{id: "cn_detect", icon: "⟳", label: "Rescan", key: "d"},
-		{id: "cn_ip", icon: "⌨", label: ipLabel, key: ipKey},
-		{id: "cn_quit", icon: "⏻", label: "Quit", key: "q"},
 	}
+	if m.ipInput.Focused() {
+		btns = append(btns,
+			toolbarButton{id: "cn_connect", icon: "‣", label: "Connect", key: "enter"},
+			toolbarButton{id: "cn_ip", icon: "✕", label: "Cancel", key: "esc"},
+		)
+	} else {
+		btns = append(btns,
+			toolbarButton{id: "cn_ip", icon: "‣", label: "Advanced / Enter IP", key: "tab"},
+		)
+	}
+	return append(btns, toolbarButton{id: "cn_quit", icon: "", label: "Quit", key: "q"})
 }
 
 // settingsToolbar returns the buttons for the settings screen.

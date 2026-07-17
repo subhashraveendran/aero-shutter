@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/subhashraveendran/aero-shutter/internal/camera"
@@ -100,13 +101,19 @@ func (m Model) viewConnect() string {
 	}
 	sections = append(sections, styleTagline.Render("Wi-Fi photo importer for Nikon"), "")
 
-	// Status card: spinner, error, manual IP input and key hints.
+	// Status card: a calm animated searching indicator, the connect target,
+	// and (only as a fallback) the manual IP field.
 	var card strings.Builder
 	switch {
 	case m.detecting:
-		card.WriteString(m.spin.View() + " Searching for camera…")
+		card.WriteString(m.spin.View() + " " + styleSubtle.Render("Searching for camera"+searchDots(m.spin)))
 	case m.connecting:
-		card.WriteString(m.spin.View() + " Connecting…")
+		target := m.connectTarget
+		if target == "" {
+			card.WriteString(m.spin.View() + " " + styleSubtle.Render("Connecting…"))
+		} else {
+			card.WriteString(m.spin.View() + " " + styleAccent.Render(target))
+		}
 	default:
 		card.WriteString(styleSubtle.Render("No camera connected."))
 	}
@@ -114,7 +121,13 @@ func (m Model) viewConnect() string {
 	if m.connectErr != "" {
 		card.WriteString(styleErrText.Render("✗ "+m.connectErr) + "\n\n")
 	}
-	card.WriteString(m.ipInput.View() + "\n\n")
+
+	// The manual IP field is a last resort: it appears only once the user has
+	// opened it (Advanced / Enter IP) or after an unsuccessful automatic sweep.
+	if m.ipInput.Focused() {
+		card.WriteString(styleSubtle.Render("Enter the camera's IP address:") + "\n")
+		card.WriteString(m.ipInput.View() + "\n\n")
+	}
 	card.WriteString(styleHint.Render("click a button below · keys optional"))
 
 	cardW := min(m.width-4, 52)
@@ -136,6 +149,16 @@ func (m Model) viewConnect() string {
 	centered := lipgloss.Place(m.width, m.height-m.connectToolbarHeight(), lipgloss.Center, lipgloss.Center, content)
 	placed, lines := m.connectToolbarLayout()
 	return lipgloss.JoinVertical(lipgloss.Left, centered, m.renderToolbar(placed, lines))
+}
+
+// searchDots animates a trailing "…" for the searching indicator by cycling
+// through zero to three dots in step with the spinner frame, so the status
+// line breathes without any extra ticker.
+func searchDots(sp spinner.Model) string {
+	// spinner.Dot has 10 frames; derive a slow 0..3 dot cycle from its view so
+	// the animation stays lightweight and in sync with the spinner.
+	n := len(sp.View()) % 4
+	return strings.Repeat(".", n)
 }
 
 // connectToolbarHeight is the number of screen rows the connect toolbar takes.

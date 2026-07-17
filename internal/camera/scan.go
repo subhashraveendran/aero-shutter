@@ -50,15 +50,14 @@ func Detect(ctx context.Context, candidates ...string) (string, error) {
 // IPv4 interface for more responders, and identifies each one with a quick
 // GetDeviceInfo connection. Candidates that answered are listed first.
 func DetectAll(ctx context.Context, candidates ...string) ([]Discovered, error) {
-	var primary []string
-	for _, addr := range candidates {
-		if addr == "" {
-			continue
-		}
-		if ptpip.Probe(ctx, addr, 1500*time.Millisecond) {
-			primary = append(primary, addr)
-		}
-	}
+	// Prepend the default gateway(s) of the active interface(s): when a camera
+	// hosts its own Wi-Fi AP it is that network's gateway, so this is almost
+	// always where it answers — no manual IP required.
+	candidates = append(DefaultGateways(ctx), candidates...)
+
+	// Probe every candidate concurrently so a dead address never delays the
+	// live one; the gateway usually answers first.
+	primary := probeCandidates(ctx, candidates)
 	addrs := mergeAddrs(primary, ScanSubnets(ctx))
 	if len(addrs) == 0 {
 		return nil, fmt.Errorf("camera: no PTP/IP camera found (tried %d known addresses and local subnets)", len(candidates))
@@ -78,6 +77,44 @@ func DetectAll(ctx context.Context, candidates ...string) ([]Discovered, error) 
 		out = append(out, d)
 	}
 	return out, nil
+}
+
+// probeCandidates probes every non-empty, de-duplicated candidate address
+// concurrently and returns those that answered, in the original input order so
+// that gateways and configured addresses keep their priority.
+func probeCandidates(ctx context.Context, candidates []string) []string {
+	uniq := make([]string, 0, len(candidates))
+	seen := map[string]bool{}
+	for _, addr := range candidates {
+		if addr == "" {
+			continue
+		}
+		key := CanonicalAddr(addr)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		uniq = append(uniq, addr)
+	}
+
+	ok := make([]bool, len(uniq))
+	var wg sync.WaitGroup
+	for i, addr := range uniq {
+		wg.Add(1)
+		go func(i int, addr string) {
+			defer wg.Done()
+			ok[i] = ptpip.Probe(ctx, addr, 1500*time.Millisecond)
+		}(i, addr)
+	}
+	wg.Wait()
+
+	var found []string
+	for i, addr := range uniq {
+		if ok[i] {
+			found = append(found, addr)
+		}
+	}
+	return found
 }
 
 // Identify opens a short-lived PTP/IP connection to addr, reads DeviceInfo

@@ -1,5 +1,7 @@
 # aero-shutter
 
+[![CI](https://github.com/subhashraveendran/aero-shutter/actions/workflows/ci.yml/badge.svg)](https://github.com/subhashraveendran/aero-shutter/actions/workflows/ci.yml)
+
 The fastest way to pull photos off a **Nikon D5300** (and other Wi-Fi Nikons)
 over Wi-Fi — straight from the camera to your disk, no USB cable, no vendor app.
 aero-shutter speaks the camera's native PTP/IP protocol over TCP and comes in two
@@ -68,7 +70,7 @@ aero-shutter/
   filter chips, row checkboxes, overflow arrows, an ⤢ Enlarge affordance and
   ✕-to-close overlays, all with hover/press feedback. Keyboard shortcuts still
   work as optional accelerators (a ? button opens the cheatsheet).
-- **Camera control** — click the 🎛 Camera button (or press `t`) for a control panel that shows live
+- **Camera control** — click the `▣ Camera` button (or press `t`) for a control panel that shows live
   camera settings (mode, aperture, shutter speed, ISO, exposure compensation,
   white balance, capture mode, battery), lets you step writable values with
   `◀`/`▶`, and triggers the shutter remotely (`T`). After a capture the file
@@ -88,6 +90,30 @@ aero-shutter/
 - **Cross-platform** — pure Go (no CGO), single static binary for macOS,
   Linux and Windows.
 
+## Try the mobile app in your browser
+
+No camera, no install — the mobile app runs fully in demo mode in your browser:
+
+**https://subhashraveendran.github.io/aero-shutter/**
+
+## Download
+
+Prebuilt terminal binaries and the Android APK are attached to each
+[GitHub Release](https://github.com/subhashraveendran/aero-shutter/releases/latest):
+
+**Terminal app** — download the archive for your platform, extract it, and run
+the `aero-shutter` binary:
+
+- macOS (Apple Silicon): `aero-shutter_<version>_macos_arm64.tar.gz`
+- macOS (Intel): `aero-shutter_<version>_macos_x86_64.tar.gz`
+- Linux (x86_64): `aero-shutter_<version>_linux_x86_64.tar.gz`
+- Linux (arm64): `aero-shutter_<version>_linux_arm64.tar.gz`
+- Windows (x86_64): `aero-shutter_<version>_windows_x86_64.zip`
+
+**Mobile app (Android)** — download `aero-shutter-mobile-<version>-debug.apk`.
+This is an unsigned debug build for sideloading; you'll need to enable
+"install from unknown sources" on your device.
+
 ## Install
 
 With Go 1.25+:
@@ -106,13 +132,25 @@ make build          # binary lands in ./dist/aero-shutter
 
 ## Connecting to the D5300
 
-The D5300 hosts its own Wi-Fi network:
+The D5300 hosts its own Wi-Fi network, and connecting is **zero-config** — you
+never need to type an IP address:
 
 1. On the camera: **MENU → Setup menu → Wi-Fi → Network connection → Enable**.
 2. On your computer, join the Wi-Fi network the camera announces
    (`Nikon_WU2_…` by default).
-3. Run `aero-shutter`. The camera assigns itself `192.168.1.1` and is detected
-   automatically; if not, enter the IP manually on the connect screen.
+3. Run `aero-shutter`. It finds the camera automatically and connects — you'll
+   see `Found NIKON D5300 at 192.168.1.1 — connecting…` with no typing.
+
+When a camera hosts its own network it is that network's gateway/DHCP server,
+so aero-shutter detects the default gateway of the interface you just joined
+(reading the OS routing table) and probes it, the factory default
+`192.168.1.1`, any saved cameras, and a quick subnet scan — all concurrently —
+then connects to the first camera that answers.
+
+Manual IP entry is only a fallback. If nothing is found automatically, the
+connect screen reveals a message and an input field; you can also open it any
+time via the **Advanced / Enter IP** button for power users. It is never the
+default focus.
 
 Only one client can talk to the camera at a time — close the Nikon mobile app
 if it is connected.
@@ -172,9 +210,9 @@ sits above the toolbar. Keyboard shortcuts still work as optional accelerators
 **Bottom toolbar** — a row of button chips, each dispatching the same action as
 its shortcut. It wraps onto more lines on narrow terminals.
 
-`⟳ Refresh` · `⬇ Import New` · `⬇⬇ Import All` · `⧉ Select` ·
-`⛃ Filter: <current>` (cycles on click) · `⚙ Settings` · `🎛 Camera` · `?`
-(cheatsheet) · `⏻ Quit`
+`⟳ Refresh` · `↓ Import New` · `⇊ Import All` · `⊕ Select` ·
+`▤ Filter: <current>` (cycles on click) · `‣ Settings` · `▣ Camera` · `?`
+(cheatsheet) · `Quit`
 
 **File list**
 
@@ -193,8 +231,9 @@ clicking their `✕` (top-right) or anywhere outside the box.
 **Camera control panel** — click the `◀`/`▶` steppers to change a value, the big
 `◉ Take Photo` button to fire the shutter, and `✕` to close.
 
-**Connect screen** — click a camera in the picker to connect, or use the
-`⏎ Connect` / `⌨ Enter IP` / `⟳ Rescan` / `⏻ Quit` toolbar.
+**Connect screen** — detection is automatic; click a camera in the picker when
+more than one is found, or use the `⟳ Rescan` / `‣ Advanced / Enter IP` /
+`Quit` toolbar. The manual IP field is a fallback, not the default focus.
 
 **Settings** — click a field to focus it, a toggle to flip it, and
 `✔ Save & Back` to save.

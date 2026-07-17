@@ -9,7 +9,9 @@ import type {
   CloseOptions,
   ConnectOptions,
   ConnectResult,
+  NetworkCapabilities,
   TcpSocketPlugin,
+  WifiInfo,
   WriteOptions,
 } from './definitions';
 import { MockCameraSocket } from './web/mock-camera';
@@ -49,7 +51,17 @@ export class TcpSocketWeb extends WebPlugin implements TcpSocketPlugin {
       }
     });
     this.sockets.set(socketId, mock);
-    return { socketId };
+    // The browser can't split routing; report the socket as unbound.
+    return { socketId, networkBinding: 'unsupported' };
+  }
+
+  async getWifiInfo(): Promise<WifiInfo> {
+    // No Wi-Fi introspection in the browser; discovery falls back to demo host.
+    return { gateway: null, ipAddress: null };
+  }
+
+  async getNetworkCapabilities(): Promise<NetworkCapabilities> {
+    return { isSplitRoutingSupported: false, platform: 'web' };
   }
 
   async write(options: WriteOptions): Promise<void> {

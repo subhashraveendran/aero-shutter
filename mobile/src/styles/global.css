@@ -386,4 +386,8 @@ img {
     transition-duration: 0.001ms !important;
   }
   .grain { animation: none; }
+  /* Radar: no motion, but keep a clear "active" static state. */
+  .radar.live .radar-sweep { opacity: 0.9 !important; }
+  .radar.live .radar-ping { opacity: 0 !important; }
+  .searching-label .pip { opacity: 1 !important; }
 }

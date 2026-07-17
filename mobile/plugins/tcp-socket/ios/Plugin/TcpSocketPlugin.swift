@@ -35,12 +35,27 @@ public class TcpSocketPlugin: CAPPlugin {
             return
         }
 
+        // bindWifi: on iOS we can PIN the camera socket to the Wi-Fi interface
+        // (requiredInterfaceType = .wifi), but that is the extent of what the OS
+        // allows. Unlike Android, iOS does NOT let a third-party app keep
+        // internet on cellular for the rest of the app while bound to a
+        // no-internet Wi-Fi for arbitrary TCP — the system owns internet
+        // routing. So this pins the camera path to Wi-Fi (so the camera is
+        // reachable even if Wi-Fi Assist would otherwise prefer cellular) but
+        // does NOT create a true split. getNetworkCapabilities() reports
+        // isSplitRoutingSupported = false so the UI can show the honest message.
+        let bindWifi = call.getBool("bindWifi") ?? true
+
         let params = NWParameters.tcp
         if let tcpOptions = params.defaultProtocolStack.internetProtocol as? NWProtocolTCP.Options {
             tcpOptions.noDelay = true
             tcpOptions.connectionTimeout = Int(timeoutMs / 1000)
         }
+        if bindWifi {
+            params.requiredInterfaceType = .wifi
+        }
 
+        let networkBinding = bindWifi ? "wifi-pinned" : "default"
         let connection = NWConnection(host: nwHost, port: nwPort, using: params)
         let queue = DispatchQueue(label: "tcpsocket.\(socketId)")
 
@@ -54,7 +69,7 @@ public class TcpSocketPlugin: CAPPlugin {
                     self.lock.lock()
                     self.connections[socketId] = connection
                     self.lock.unlock()
-                    call.resolve(["socketId": socketId])
+                    call.resolve(["socketId": socketId, "networkBinding": networkBinding])
                     self.receive(socketId: socketId, connection: connection)
                 }
             case .failed(let error):
@@ -127,6 +142,22 @@ public class TcpSocketPlugin: CAPPlugin {
         }
         cleanup(socketId)
         call.resolve()
+    }
+
+    @objc func getWifiInfo(_ call: CAPPluginCall) {
+        // iOS heavily restricts Wi-Fi introspection; without the (special
+        // entitlement) Hotspot / NEHotspotNetwork APIs an app can't read the
+        // gateway. Return nulls so JS discovery falls back to the standard
+        // Nikon AP candidate list (192.168.1.1, ...).
+        call.resolve(["gateway": NSNull(), "ipAddress": NSNull()])
+    }
+
+    @objc func getNetworkCapabilities(_ call: CAPPluginCall) {
+        // iOS cannot split arbitrary-TCP camera Wi-Fi from cellular internet.
+        call.resolve([
+            "isSplitRoutingSupported": false,
+            "platform": "ios"
+        ])
     }
 
     private func cleanup(_ socketId: String) {

@@ -7,6 +7,7 @@ package frontend
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -49,11 +50,12 @@ type Model struct {
 	screen        screen
 
 	// Connect screen.
-	spin       spinner.Model
-	ipInput    textinput.Model
-	detecting  bool
-	connecting bool
-	connectErr string
+	spin          spinner.Model
+	ipInput       textinput.Model
+	detecting     bool
+	connecting    bool
+	connectErr    string
+	connectTarget string // "Found NIKON D5300 at 192.168.1.1 — connecting…"
 
 	// Camera picker (shown when more than one camera is available).
 	picker       bool
@@ -181,6 +183,20 @@ func (m Model) detectCandidates() []string {
 	return append(cand, camera.D5300Profile.DefaultIP)
 }
 
+// foundLabel builds the calm "Found NIKON D5300 at 192.168.1.1 — connecting…"
+// status shown while the single auto-detected camera is being connected. The
+// model name is omitted when detection did not identify the body.
+func foundLabel(d camera.Discovered) string {
+	host := d.Addr
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if d.Model != "" {
+		return fmt.Sprintf("Found %s at %s — connecting…", d.Model, host)
+	}
+	return fmt.Sprintf("Found camera at %s — connecting…", host)
+}
+
 // Update routes messages to the active screen.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -275,6 +291,7 @@ func (m Model) updateConnect(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.connecting = true
 			m.connectErr = ""
+			m.connectTarget = "Connecting to " + addr + "…"
 			return m, tea.Batch(m.spin.Tick, connectCmd(m.cam, addr))
 		case "d":
 			if !m.ipInput.Focused() {
@@ -292,11 +309,13 @@ func (m Model) updateConnect(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case discoveredMsg:
 		m.detecting = false
 		if msg.err != nil {
-			m.connectErr = msg.err.Error()
+			m.connectErr = "No camera found automatically. Make sure the camera's " +
+				"Wi-Fi is on and you've joined its network. You can enter an IP manually:"
 			return m, m.ipInput.Focus()
 		}
 		if len(msg.cams) == 1 {
 			m.connecting = true
+			m.connectTarget = foundLabel(msg.cams[0])
 			return m, tea.Batch(m.spin.Tick, connectCmd(m.cam, msg.cams[0].Addr))
 		}
 		m.pickerItems = buildPicker(m.cfg.Cameras, msg.cams)
@@ -307,6 +326,7 @@ func (m Model) updateConnect(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case connectedMsg:
 		m.connecting = false
+		m.connectTarget = ""
 		if msg.err != nil {
 			m.connectErr = msg.err.Error()
 			return m, m.ipInput.Focus()
@@ -370,6 +390,8 @@ func (m Model) pickerConnect() (tea.Model, tea.Cmd) {
 func (m Model) startDetect() (tea.Model, tea.Cmd) {
 	m.detecting = true
 	m.connectErr = ""
+	m.connectTarget = ""
+	m.ipInput.Blur()
 	return m, tea.Batch(m.spin.Tick, detectCmd(m.detectCandidates()...))
 }
 

@@ -12,6 +12,14 @@ export interface Settings {
   cameraIp: string;
   keepAwake: boolean;
   theme: Theme;
+  /**
+   * Android only: bind the camera socket to the Wi-Fi network so the rest of
+   * the device keeps using cellular for internet while joined to the camera's
+   * no-internet AP. No effect on iOS / web.
+   */
+  keepInternetOnCellular: boolean;
+  /** Fire local notifications on import-complete and new-shot events. */
+  notifyOnImport: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -21,6 +29,8 @@ export const DEFAULT_SETTINGS: Settings = {
   cameraIp: '192.168.1.1',
   keepAwake: true,
   theme: 'dark',
+  keepInternetOnCellular: true,
+  notifyOnImport: true,
 };
 
 const KEY = 'aero-shutter.settings';

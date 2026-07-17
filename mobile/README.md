@@ -17,6 +17,23 @@ TypeScript and bridged to native TCP sockets on iOS and Android.
 | ------- | ------- | -------------- | ------------ |
 | _tbd_   | _tbd_   | _tbd_          | _tbd_        |
 
+## Live demo & downloads
+
+Try the app right now in your browser — no camera, no install:
+
+**https://subhashraveendran.github.io/aero-shutter/**
+
+An Android build is attached to every
+[GitHub Release](https://github.com/subhashraveendran/aero-shutter/releases/latest)
+as `aero-shutter-mobile-<version>-debug.apk`. This is an **unsigned debug build**
+for sideloading. To install it, enable installing from unknown sources on your
+device:
+
+- **Android 8+**: open the APK, and when prompted grant your browser or file
+  manager permission to install unknown apps (**Settings → Apps → [that app] →
+  Install unknown apps → Allow from this source**), then continue.
+- **Older Android**: **Settings → Security → Unknown sources** and enable it.
+
 ## Demo mode (runs in any browser, no camera needed)
 
 The web build ships a **mock camera** that speaks enough PTP/IP for the entire app to

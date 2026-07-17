@@ -53,13 +53,16 @@ function jpegDataUrl(bytes: Uint8Array): string {
 export class CameraService {
   private client: PtpIpClient | null = null;
   cameraModel = '';
+  /** How the camera socket was bound to the network ('wifi-bound', etc). */
+  networkBinding: string | null = null;
 
-  async connect(host: string, port = 15740): Promise<void> {
-    const client = new PtpIpClient(host, port);
+  async connect(host: string, port = 15740, bindWifi = true): Promise<void> {
+    const client = new PtpIpClient(host, port, 'AeroShutter', bindWifi);
     await client.connect();
     await client.openSession();
     this.client = client;
     this.cameraModel = client.responderName || 'Camera';
+    this.networkBinding = client.networkBinding;
   }
 
   get connected(): boolean {

@@ -252,7 +252,7 @@ func (m Model) handleControlMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			mm, cmd := m.showToast(msg.err.Error(), true)
 			return mm, cmd, true
 		}
-		mm, cmd := m.showToast("📸 Captured", false)
+		mm, cmd := m.showToast("◉ Captured", false)
 		return mm, tea.Batch(cmd, captureRefreshCmd()), true
 
 	case ctrlRefreshMsg:
