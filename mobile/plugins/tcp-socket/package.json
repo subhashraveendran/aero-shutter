@@ -1,0 +1,26 @@
+{
+  "name": "@aero-shutter/tcp-socket",
+  "version": "1.0.0",
+  "description": "Capacitor plugin providing raw TCP sockets for PTP/IP camera connections, with a browser demo-mode fallback.",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    },
+    "android": {
+      "src": "android",
+      "package": "com.aeroshutter.tcpsocket"
+    }
+  },
+  "files": [
+    "android/src/main/",
+    "ios/Sources/",
+    "ios/Plugin/",
+    "AeroShutterTcpSocket.podspec"
+  ],
+  "peerDependencies": {
+    "@capacitor/core": "^6.0.0"
+  }
+}

@@ -14,3 +14,14 @@ dist/
 # Editor and OS noise
 .DS_Store
 *.swp
+
+# Mobile (Capacitor) build output and deps
+mobile/node_modules/
+mobile/dist/
+mobile/ios/App/Pods/
+mobile/ios/App/build/
+mobile/android/.gradle/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/local.properties
+mobile/.env

@@ -1,0 +1,18 @@
+/* Self-hosted fonts (bundled via @fontsource — no network, no FOUT to system). */
+
+/* Fraunces — editorial display serif for the wordmark & headings. */
+@import '@fontsource/fraunces/400.css';
+@import '@fontsource/fraunces/500.css';
+@import '@fontsource/fraunces/600.css';
+@import '@fontsource/fraunces/700.css';
+
+/* Archivo — clean grotesque for body & UI. */
+@import '@fontsource/archivo/400.css';
+@import '@fontsource/archivo/500.css';
+@import '@fontsource/archivo/600.css';
+@import '@fontsource/archivo/700.css';
+
+/* IBM Plex Mono — instrument readout for all technical data. */
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+@import '@fontsource/ibm-plex-mono/600.css';

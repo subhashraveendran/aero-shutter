@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/subhashraveendran/aero-shutter/internal/camera"
 	"github.com/subhashraveendran/aero-shutter/internal/config"
 )
@@ -18,6 +20,7 @@ func testBrowserModel(n, width, height int) Model {
 	return Model{
 		width:    width,
 		height:   height,
+		cam:      camera.New(),
 		files:    files,
 		selected: map[uint32]bool{},
 		imported: map[string]bool{},
@@ -61,32 +64,161 @@ func TestFileRowAt(t *testing.T) {
 	}
 }
 
-func TestFooterZones(t *testing.T) {
-	zones := footerZones(helpText, 29)
-	if len(zones) != len(footerShortcuts) {
-		t.Fatalf("got %d zones, want %d", len(zones), len(footerShortcuts))
+// TestToolbarHitZones verifies that the browser toolbar renders and hit-tests
+// from the same placed-button geometry: every button's span maps back to its
+// own id, gaps between chips are dead space, and clicking the toolbar dispatches
+// the button's key.
+func TestToolbarHitZones(t *testing.T) {
+	m := testBrowserModel(50, 200, 30) // wide enough for a single toolbar row
+	placed, lines := m.browserToolbarLayout()
+	if lines < 1 {
+		t.Fatalf("toolbar must occupy at least one line, got %d", lines)
 	}
-	// "q quit" leads the help text; the style pads one cell on the left.
-	if key, ok := zoneAt(zones, 1, 29); !ok || key != "q" {
-		t.Errorf("click at start of 'q quit': got (%q, %v), want (q, true)", key, ok)
+	if len(placed) != len(m.browserToolbar()) {
+		t.Fatalf("placed %d buttons, want %d", len(placed), len(m.browserToolbar()))
 	}
-	if key, ok := zoneAt(zones, 6, 29); !ok || key != "q" {
-		t.Errorf("click at end of 'q quit': got (%q, %v)", key, ok)
-	}
-	// The separator between labels is dead space.
-	if _, ok := zoneAt(zones, 7, 29); ok {
-		t.Error("separator must not be clickable")
-	}
-	// Wrong line: nothing hit.
-	if _, ok := zoneAt(zones, 1, 28); ok {
-		t.Error("clicks off the help line must not hit")
-	}
-	// Every declared shortcut resolves to its key at the zone start.
-	for _, z := range zones {
-		key, ok := zoneAt(zones, z.startX, z.y)
-		if !ok || key != z.key {
-			t.Errorf("zone %q at x=%d: got (%q, %v)", z.key, z.startX, key, ok)
+	// Every button resolves to itself across its whole span.
+	for _, p := range placed {
+		for x := p.startX; x <= p.endX; x++ {
+			got, ok := toolbarZoneAt(placed, x, p.y)
+			if !ok || got.id != p.id {
+				t.Fatalf("button %q at x=%d: got (%q, %v)", p.id, x, got.id, ok)
+			}
 		}
+	}
+	// The single-cell gap between the first two chips is dead space.
+	gapX := placed[0].endX + 1
+	if _, ok := toolbarZoneAt(placed, gapX, placed[0].y); ok {
+		t.Errorf("gap column %d must not be clickable", gapX)
+	}
+	// Off the toolbar row: nothing hit.
+	if _, ok := toolbarZoneAt(placed, placed[0].startX, placed[0].y-1); ok {
+		t.Error("clicks off the toolbar row must not hit")
+	}
+	// A press+release on the Quit button dispatches its "q" key (quit).
+	var quit placedButton
+	for _, p := range placed {
+		if p.id == "tb_quit" {
+			quit = p
+		}
+	}
+	press := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: quit.startX, Y: quit.y}
+	mm, _ := m.browserMouse(press)
+	rel := tea.MouseMsg{Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft, X: quit.startX, Y: quit.y}
+	mm, _ = mm.(Model).browserMouse(rel)
+	if !mm.(Model).quitting {
+		t.Error("clicking the Quit button must quit")
+	}
+}
+
+// TestToolbarWraps checks the toolbar wraps onto more lines on a narrow
+// terminal, so the layout math never overflows the width.
+func TestToolbarWraps(t *testing.T) {
+	m := testBrowserModel(50, 30, 30) // narrow: buttons cannot fit on one row
+	placed, lines := m.browserToolbarLayout()
+	if lines < 2 {
+		t.Fatalf("narrow toolbar should wrap, got %d lines", lines)
+	}
+	for _, p := range placed {
+		if p.endX >= m.width && p.startX > 0 {
+			t.Errorf("button %q overflows width %d: endX=%d", p.id, m.width, p.endX)
+		}
+	}
+}
+
+// TestFilterChipHitZones verifies the filter-chip row renders and hit-tests from
+// the same geometry, and that clicking a chip selects that filter.
+func TestFilterChipHitZones(t *testing.T) {
+	m := testBrowserModel(50, 120, 30)
+	chips := m.browserFilterChips()
+	if len(chips) != len(listFilters) {
+		t.Fatalf("got %d chips, want %d", len(chips), len(listFilters))
+	}
+	// Each chip resolves to its own index across its whole span.
+	for _, c := range chips {
+		for x := c.startX; x <= c.endX; x++ {
+			got, ok := filterChipAt(chips, x, c.y)
+			if !ok || got.idx != c.idx {
+				t.Fatalf("chip %d at x=%d: got (%d, %v)", c.idx, x, got.idx, ok)
+			}
+		}
+	}
+	// The " · " separator between chips is dead space.
+	sepX := chips[0].endX + 1
+	if _, ok := filterChipAt(chips, sepX, chips[0].y); ok {
+		t.Errorf("separator column %d must not be clickable", sepX)
+	}
+	// Clicking the last chip (index len-1) selects that filter.
+	last := chips[len(chips)-1]
+	press := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: last.startX, Y: last.y}
+	mm, _ := m.browserMouse(press)
+	rel := tea.MouseMsg{Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft, X: last.startX, Y: last.y}
+	mm, _ = mm.(Model).browserMouse(rel)
+	if mm.(Model).filterIdx != last.idx {
+		t.Errorf("clicking chip %d set filterIdx=%d", last.idx, mm.(Model).filterIdx)
+	}
+}
+
+// TestToolbarHoverRerenders confirms mouse motion updates the hovered zone id so
+// the render can highlight the button under the cursor.
+func TestToolbarHoverRerenders(t *testing.T) {
+	m := testBrowserModel(50, 200, 30)
+	placed, _ := m.browserToolbarLayout()
+	target := placed[0]
+	motion := tea.MouseMsg{Action: tea.MouseActionMotion, X: target.startX, Y: target.y}
+	mm, _ := m.browserMouse(motion)
+	if mm.(Model).hoverZone != target.id {
+		t.Errorf("hoverZone = %q, want %q", mm.(Model).hoverZone, target.id)
+	}
+	// Moving off every zone clears the hover.
+	off := tea.MouseMsg{Action: tea.MouseActionMotion, X: 0, Y: 0}
+	mm, _ = mm.(Model).browserMouse(off)
+	if mm.(Model).hoverZone != "" {
+		t.Errorf("hoverZone = %q after moving off, want empty", mm.(Model).hoverZone)
+	}
+}
+
+// TestSettingsToolbarHitZones verifies the settings toolbar buttons render and
+// hit-test from the same geometry.
+func TestSettingsToolbarHitZones(t *testing.T) {
+	m := testBrowserModel(0, 100, 30)
+	placed, lines := m.settingsToolbarLayout(0)
+	if lines != 1 {
+		t.Fatalf("settings toolbar should fit one line, got %d", lines)
+	}
+	if len(placed) != len(m.settingsToolbar()) {
+		t.Fatalf("placed %d buttons, want %d", len(placed), len(m.settingsToolbar()))
+	}
+	for _, p := range placed {
+		got, ok := toolbarZoneAt(placed, p.startX, p.y)
+		if !ok || got.id != p.id {
+			t.Errorf("button %q at x=%d: got (%q, %v)", p.id, p.startX, got.id, ok)
+		}
+	}
+	// shiftPlaced offsets every span so card-relative buttons map to screen
+	// columns.
+	shifted := shiftPlaced(placed, 10)
+	if shifted[0].startX != placed[0].startX+10 {
+		t.Errorf("shiftPlaced startX = %d, want %d", shifted[0].startX, placed[0].startX+10)
+	}
+}
+
+// TestConnectToolbarHitZones verifies the connect toolbar dispatches its
+// buttons' keys and that clicking Quit quits.
+func TestConnectToolbarHitZones(t *testing.T) {
+	m := New(config.Config{}, nil)
+	m.width, m.height = 100, 30
+	placed, _ := m.connectToolbarLayout()
+	var quit placedButton
+	for _, p := range placed {
+		if p.id == "cn_quit" {
+			quit = p
+		}
+	}
+	rel := tea.MouseMsg{Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft, X: quit.startX, Y: quit.y}
+	mm, _ := m.connectMouse(rel)
+	if !mm.(Model).quitting {
+		t.Error("clicking connect Quit must quit")
 	}
 }
 

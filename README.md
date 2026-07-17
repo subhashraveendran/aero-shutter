@@ -1,11 +1,29 @@
 # aero-shutter
 
-The fastest way to pull photos off a **Nikon D5300** over Wi-Fi — straight from
-the camera to your disk, no USB cable, no vendor app. aero-shutter speaks the
-camera's native PTP/IP protocol over TCP and wraps it in a clean, keyboard-driven
-terminal UI in the spirit of lazygit and btop.
+The fastest way to pull photos off a **Nikon D5300** (and other Wi-Fi Nikons)
+over Wi-Fi — straight from the camera to your disk, no USB cable, no vendor app.
+aero-shutter speaks the camera's native PTP/IP protocol over TCP and comes in two
+flavours that share the same protocol design:
 
-> Screenshot coming soon.
+- **Terminal app** (`/cmd`, `/internal`) — a fast, **click-first** TUI in the
+  spirit of lazygit and btop. Everything is clickable; keyboard shortcuts are
+  optional. Written in Go.
+- **Mobile app** (`/mobile`) — **AeroShutter Mobile**, an iOS & Android companion
+  with a "darkroom instrument" design, camera control, and optional auto-import.
+  Built with Capacitor + React + TypeScript, and runs in your browser in demo
+  mode with no camera needed.
+
+This is a monorepo:
+
+```
+aero-shutter/
+├── cmd/ internal/     Go terminal app (PTP/IP core + click-first TUI)
+├── mobile/            AeroShutter Mobile (Capacitor + React + TypeScript)
+├── Makefile  go.mod   terminal-app build
+└── README.md
+```
+
+> Screenshots coming soon.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -46,10 +64,11 @@ terminal UI in the spirit of lazygit and btop.
   renderer as a universal fallback so previews work in every color terminal,
   including macOS Terminal.app. On Nikon bodies that support it, the larger
   vendor preview (GetLargeThumb) is fetched automatically for a sharper image.
-- **Mouse support** — scroll the file list with the wheel, click rows to move
-  the cursor, click again to select, double-click for the large preview, and
-  click the help-bar shortcuts.
-- **Camera control** — press `t` to open a control panel that shows live
+- **Click-first interface** — everything is clickable: a button toolbar,
+  filter chips, row checkboxes, overflow arrows, an ⤢ Enlarge affordance and
+  ✕-to-close overlays, all with hover/press feedback. Keyboard shortcuts still
+  work as optional accelerators (a ? button opens the cheatsheet).
+- **Camera control** — click the 🎛 Camera button (or press `t`) for a control panel that shows live
   camera settings (mode, aperture, shutter speed, ISO, exposure compensation,
   white balance, capture mode, battery), lets you step writable values with
   `◀`/`▶`, and triggers the shutter remotely (`T`). After a capture the file
@@ -140,7 +159,50 @@ updated automatically on every successful connection.
 > in the VS Code settings. Enable it for sharp previews, or set
 > `"preview_mode": "halfblock"` in `config.json` to force the text renderer.
 
-## Keybindings
+## Click-first interface
+
+aero-shutter is designed to be driven entirely with the mouse — **everything is
+clickable**, so there are no keybindings to memorize. Elements highlight on
+hover and depress on click, and a subtle _"click anything · keys optional"_ hint
+sits above the toolbar. Keyboard shortcuts still work as optional accelerators
+(the clickable **?** button opens a cheatsheet listing them all).
+
+### Clicking your way around
+
+**Bottom toolbar** — a row of button chips, each dispatching the same action as
+its shortcut. It wraps onto more lines on narrow terminals.
+
+`⟳ Refresh` · `⬇ Import New` · `⬇⬇ Import All` · `⧉ Select` ·
+`⛃ Filter: <current>` (cycles on click) · `⚙ Settings` · `🎛 Camera` · `?`
+(cheatsheet) · `⏻ Quit`
+
+**File list**
+
+| Click                          | Action                                            |
+| ------------------------------ | ------------------------------------------------- |
+| a filter chip (`All · New · RAW · JPEG · Imported`) | set that filter          |
+| the `☐`/`☑` checkbox at row start | toggle selection without moving the cursor     |
+| anywhere else on a row         | move the cursor to that row                       |
+| double-click a row             | open the large preview overlay                    |
+| `▲ more` / `▼ more`            | page up/down when the list overflows              |
+| wheel up/down                  | scroll the list (3 rows per notch)                |
+
+**Preview** — click `⤢ Enlarge` for the big preview overlay. Overlays close by
+clicking their `✕` (top-right) or anywhere outside the box.
+
+**Camera control panel** — click the `◀`/`▶` steppers to change a value, the big
+`◉ Take Photo` button to fire the shutter, and `✕` to close.
+
+**Connect screen** — click a camera in the picker to connect, or use the
+`⏎ Connect` / `⌨ Enter IP` / `⟳ Rescan` / `⏻ Quit` toolbar.
+
+**Settings** — click a field to focus it, a toggle to flip it, and
+`✔ Save & Back` to save.
+
+### Keyboard shortcuts (optional)
+
+Every action above is also bound to a key. Click the **?** button (or press `?`)
+for the in-app cheatsheet.
 
 | Key      | Action                                        |
 | -------- | --------------------------------------------- |
@@ -151,7 +213,7 @@ updated automatically on every successful connection.
 | `space`  | toggle selection on the highlighted file      |
 | `S`      | import selected files                         |
 | `enter`  | load preview for the highlighted file         |
-| `f`      | cycle filter: all → new → raw → jpeg          |
+| `f`      | cycle filter: all → new → raw → jpeg → imported |
 | `P`      | large preview overlay                         |
 | `D`      | metadata detail overlay                       |
 | `O`      | open the imported file with the OS viewer     |
@@ -162,24 +224,7 @@ updated automatically on every successful connection.
 | `w`      | toggle watch mode (poll camera every 5s)      |
 | `x`/`esc`| cancel a running import                       |
 | `↑↓`/`jk`| move the cursor                               |
-
-### Mouse
-
-| Gesture               | Action                                                  |
-| --------------------- | ------------------------------------------------------- |
-| wheel up/down         | scroll the file list (3 rows per notch)                 |
-| click on a row        | move the cursor to that row                             |
-| click on the cursor row | toggle its selection checkbox (same as `space`)       |
-| double-click on a row | open the large preview overlay (same as `P`)            |
-| click in an overlay   | close the overlay                                       |
-| click a help-bar label | trigger that shortcut (`q`, `r`, `i`, `a`, `f`, `s`, `c`, `t`) |
-
-In the camera control panel the wheel scrolls the setting rows, a click
-selects a row, clicking the `◀`/`▶` arrows steps the value, and clicking
-"Take photo" fires the shutter.
-
-On the connect screen the camera picker is mouse-aware too: click an entry to
-connect, scroll to move the selection.
+| `?`      | toggle the keybindings cheatsheet             |
 
 ## How it works
 

@@ -25,6 +25,9 @@ const (
 	FilterRAW
 	FilterJPEG
 	FilterSelected
+	// FilterImported is a display-only filter: it shows the files that have
+	// already been imported. It is not used to drive an import run.
+	FilterImported
 )
 
 // String returns the display name of the filter.
@@ -40,6 +43,8 @@ func (f Filter) String() string {
 		return "jpeg"
 	case FilterSelected:
 		return "selected"
+	case FilterImported:
+		return "imported"
 	default:
 		return "unknown"
 	}
@@ -128,6 +133,8 @@ func Matches(f camera.File, opts Options, imported map[string]bool) bool {
 		return f.Format == ptpip.FormatNEF || f.Format == ptpip.FormatUndefined
 	case FilterJPEG:
 		return f.Format == ptpip.FormatJPEG
+	case FilterImported:
+		return imported[database.Key(f.Handle, f.Name, f.Size)]
 	default:
 		return true
 	}

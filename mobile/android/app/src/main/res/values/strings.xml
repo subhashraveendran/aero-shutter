@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AeroShutter</string>
+    <string name="title_activity_main">AeroShutter</string>
+    <string name="package_name">com.aeroshutter.app</string>
+    <string name="custom_url_scheme">com.aeroshutter.app</string>
+</resources>

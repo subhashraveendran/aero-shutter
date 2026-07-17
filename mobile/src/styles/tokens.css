@@ -1,0 +1,114 @@
+/* ============================================================
+   DARKROOM INSTRUMENT — design tokens
+   Deep charcoal base, warm amber safelight accent, filmic.
+   ============================================================ */
+
+:root {
+  /* --- Surfaces (dark darkroom, warm-leaning) --- */
+  --bg: #0a0a0b;
+  --bg-deep: #060606;
+  --bg-elevated: #131110;
+  --card: #17140f;
+  --card-2: #1e1a13;
+  --card-hover: #24201a;
+  --border: #2a251d;
+  --border-strong: #3a3327;
+
+  /* --- Text (warm paper whites) --- */
+  --text: #f2ece0;
+  --text-dim: #a89e8c;
+  --text-faint: #6c6558;
+
+  /* --- Amber safelight accent --- */
+  --amber: #ff8a3d;
+  --amber-bright: #ffb454;
+  --amber-deep: #d96a24;
+  --amber-ink: #1a0e05; /* readable text on amber */
+  --amber-glow: rgba(255, 138, 61, 0.45);
+  --amber-soft: rgba(255, 138, 61, 0.14);
+  --amber-line: rgba(255, 138, 61, 0.32);
+
+  /* --- Restrained secondary: desaturated film cyan (used sparingly) --- */
+  --film-cyan: #7fb3ad;
+  --film-cyan-soft: rgba(127, 179, 173, 0.16);
+
+  /* --- Feedback --- */
+  --success: #86b06a;
+  --warning: #ffb454;
+  --error: #e56a4f;
+
+  /* --- Radius scale (mechanical, restrained) --- */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 22px;
+  --r-full: 999px;
+
+  /* --- Spacing scale --- */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+
+  /* --- Motion --- */
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 150ms;
+  --dur-med: 240ms;
+  --dur-slow: 420ms;
+
+  /* --- Safe areas --- */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  --shadow-card: 0 8px 28px rgba(0, 0, 0, 0.55);
+  --shadow-float: 0 16px 48px rgba(0, 0, 0, 0.7);
+  --shadow-amber: 0 8px 32px rgba(255, 138, 61, 0.28);
+
+  /* --- Type families --- */
+  --font-display: 'Fraunces', 'Times New Roman', serif;
+  --font-body: 'Archivo', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+}
+
+/* ============================================================
+   LIGHTBOX / CONTACT-SHEET — light theme (warm paper)
+   ============================================================ */
+:root[data-theme='light'] {
+  --bg: #f4f0e8;
+  --bg-deep: #e9e3d6;
+  --bg-elevated: #fbf8f2;
+  --card: #fbf8f1;
+  --card-2: #f2ecdf;
+  --card-hover: #ece4d3;
+  --border: #ddd3bf;
+  --border-strong: #c8bca0;
+
+  --text: #1a1712;
+  --text-dim: #6a6152;
+  --text-faint: #9a9080;
+
+  --amber: #d9691f;
+  --amber-bright: #e0821f;
+  --amber-deep: #b8560f;
+  --amber-ink: #fffaf3;
+  --amber-glow: rgba(217, 105, 31, 0.35);
+  --amber-soft: rgba(217, 105, 31, 0.12);
+  --amber-line: rgba(217, 105, 31, 0.35);
+
+  --film-cyan: #3d7a72;
+  --film-cyan-soft: rgba(61, 122, 114, 0.14);
+
+  --success: #5a8a3f;
+  --warning: #b8720f;
+  --error: #c04a2f;
+
+  --shadow-card: 0 6px 22px rgba(60, 45, 25, 0.1);
+  --shadow-float: 0 14px 42px rgba(60, 45, 25, 0.18);
+  --shadow-amber: 0 8px 28px rgba(217, 105, 31, 0.22);
+}

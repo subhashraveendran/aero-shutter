@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -92,6 +93,11 @@ func pickerTop(termHeight, itemCount int) int {
 	return gap / 2
 }
 
+// pickerItemID is the hover-zone id for picker item i.
+func pickerItemID(i int) string {
+	return "pick_" + strconv.Itoa(i)
+}
+
 // pickerItemAt maps a screen row to a picker item index. Items start two
 // lines below the picker top (title + blank line).
 func pickerItemAt(termHeight, itemCount, y int) (int, bool) {
@@ -111,18 +117,25 @@ func (m Model) viewPicker() string {
 		if i == m.pickerCursor {
 			cursor = styleAccent.Render("▸ ")
 		}
-		label := fmt.Sprintf("%s — %s", it.name, it.addr)
+		text := fmt.Sprintf("%s — %s", it.name, it.addr)
 		switch {
 		case it.saved && !it.found:
-			label = styleDimText.Render(label + "  (saved, offline)")
+			text += "  (saved, offline)"
 		case it.saved:
-			label = styleRow.Render(label + "  (saved)")
+			text += "  (saved)"
+		}
+		var label string
+		switch {
+		case m.hoverZone == pickerItemID(i):
+			label = styleRowHover.Render(text)
+		case it.saved && !it.found:
+			label = styleDimText.Render(text)
 		default:
-			label = styleRow.Render(label)
+			label = styleRow.Render(text)
 		}
 		lines = append(lines, cursor+label)
 	}
-	lines = append(lines, "", styleHelp.Render("↑/↓ select · enter connect · d rescan · m manual ip · q quit"))
+	lines = append(lines, "", styleHint.Render("click a camera · keys optional"))
 	content := strings.Join(lines, "\n")
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }

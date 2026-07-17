@@ -34,7 +34,7 @@ const (
 
 // listFilter cycles the display filter with the f key.
 var listFilters = []importer.Filter{
-	importer.FilterAll, importer.FilterNew, importer.FilterRAW, importer.FilterJPEG,
+	importer.FilterAll, importer.FilterNew, importer.FilterRAW, importer.FilterJPEG, importer.FilterImported,
 }
 
 // Model is the root Bubble Tea model.
@@ -106,6 +106,15 @@ type Model struct {
 	// Mouse double-click tracking.
 	lastClickRow  int
 	lastClickTime time.Time
+
+	// Hover/press model for the click-first UI. hoverZone holds the id of the
+	// zone under the cursor; pressedZone holds the id being held down. Both are
+	// empty when nothing is hovered/pressed.
+	hoverZone   string
+	pressedZone string
+
+	// Keybindings cheatsheet overlay, toggled by the clickable "?" button.
+	cheatOverlay bool
 
 	// Toasts.
 	toast    string
@@ -440,6 +449,14 @@ func (m Model) browserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.controlKey(msg)
 	}
 
+	if m.cheatOverlay {
+		switch key {
+		case "esc", "q", "?", "enter":
+			m.cheatOverlay = false
+		}
+		return m, nil
+	}
+
 	// Overlays swallow most keys.
 	if m.previewOverlay || m.detailOverlay {
 		switch key {
@@ -557,8 +574,21 @@ func (m Model) browserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return model, tea.Batch(cmd, watchTickCmd())
 		}
 		return m.showToast("watch mode off", false)
+	case "?":
+		m.cheatOverlay = !m.cheatOverlay
+		return m, nil
 	}
 	return m, nil
+}
+
+// setFilter jumps directly to a filter (used by the clickable filter chips and
+// the Filter toolbar button when it needs an explicit target).
+func (m *Model) setFilter(idx int) {
+	if idx < 0 || idx >= len(listFilters) {
+		return
+	}
+	m.filterIdx = idx
+	m.cursor, m.offset = 0, 0
 }
 
 // switchCamera cleanly disconnects the current camera and returns to the
@@ -660,6 +690,9 @@ func (m Model) openSettings() (tea.Model, tea.Cmd) {
 const settingsFieldCount = 4
 
 func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if mouse, ok := msg.(tea.MouseMsg); ok {
+		return m.settingsMouse(mouse)
+	}
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil

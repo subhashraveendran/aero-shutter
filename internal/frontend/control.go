@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -298,47 +299,106 @@ func (m Model) ctrlBoxOrigin() (x, y int) {
 // value, and a click on "Take photo" fires the shutter.
 func (m Model) controlMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch {
+	case msg.Action == tea.MouseActionMotion:
+		return m.setHover(m.ctrlHoverZone(msg.X, msg.Y)), nil
+
 	case msg.Button == tea.MouseButtonWheelUp:
 		m.ctrlMoveCursor(-1)
 		return m, nil
 	case msg.Button == tea.MouseButtonWheelDown:
 		m.ctrlMoveCursor(1)
 		return m, nil
-	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
-		x0, y0 := m.ctrlBoxOrigin()
-		contentX := x0 + 3 // border + horizontal padding
-		relY := msg.Y - (y0 + ctrlRowsTop)
-		vis := m.ctrlVisibleRows() // the placeholder text also occupies one row
 
-		// Setting rows.
-		if relY >= 0 && relY < vis && len(m.ctrlSettings) > 0 {
-			row := m.ctrlOffset + relY
-			if row < len(m.ctrlSettings) {
-				m.ctrlCursor = row
-				relX := msg.X - contentX
-				switch {
-				case relX >= ctrlDecCol-1 && relX <= ctrlDecCol+1:
-					return m.ctrlStep(-1)
-				case relX >= ctrlIncCol-1 && relX <= ctrlIncCol+1:
-					return m.ctrlStep(1)
-				}
-				return m, nil
+	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
+		m.pressedZone = m.ctrlHoverZone(msg.X, msg.Y)
+		return m, nil
+
+	case msg.Action == tea.MouseActionRelease && msg.Button == tea.MouseButtonLeft:
+		m.pressedZone = ""
+		return m.controlClick(msg)
+	}
+	return m, nil
+}
+
+// ctrlCloseZone reports whether (x, y) hits the control overlay's ✕ close glyph.
+func (m Model) ctrlCloseZone(x, y int) bool {
+	x0, y0 := m.ctrlBoxOrigin()
+	box := m.viewControlOverlay()
+	w := lipgloss.Width(box)
+	// The ✕ sits at the last inner-text column: border (1) + right padding (2)
+	// in from the box's right edge, i.e. x0+w-4. Accept the adjacent cell too.
+	closeX := x0 + w - 4
+	return y == y0+2 && (x == closeX || x == closeX+1)
+}
+
+// ctrlHoverZone returns the id of the interactive control-overlay element under
+// (x, y).
+func (m Model) ctrlHoverZone(x, y int) string {
+	if m.ctrlCloseZone(x, y) {
+		return closeID
+	}
+	x0, y0 := m.ctrlBoxOrigin()
+	contentX := x0 + 3
+	relY := msg2rel(y, y0)
+	vis := m.ctrlVisibleRows()
+	if relY >= 0 && relY < vis && len(m.ctrlSettings) > 0 {
+		row := m.ctrlOffset + relY
+		if row < len(m.ctrlSettings) {
+			relX := x - contentX
+			switch {
+			case relX >= ctrlDecCol-1 && relX <= ctrlDecCol+1:
+				return ctrlDecID(row)
+			case relX >= ctrlIncCol-1 && relX <= ctrlIncCol+1:
+				return ctrlIncID(row)
 			}
 		}
+	}
+	if relY == vis+1 {
+		return ctrlTakeID
+	}
+	return ""
+}
 
-		// "Take photo" row sits one blank line below the last visible row.
-		if relY == vis+1 {
-			m.ctrlCursor = m.ctrlTakeRow()
-			return m.ctrlCapture()
-		}
+// msg2rel converts a screen row to a control-content-relative row.
+func msg2rel(y, y0 int) int { return y - (y0 + ctrlRowsTop) }
 
-		// A click outside the overlay closes it.
-		box := m.viewControlOverlay()
-		w, h := lipgloss.Width(box), lipgloss.Height(box)
-		if msg.X < x0 || msg.X >= x0+w || msg.Y < y0 || msg.Y >= y0+h {
-			m.ctrlOverlay = false
-		}
+// controlClick dispatches the action for the control-overlay element under the
+// cursor on button release.
+func (m Model) controlClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.ctrlCloseZone(msg.X, msg.Y) {
+		m.ctrlOverlay = false
+		m.hoverZone = ""
 		return m, nil
+	}
+	x0, y0 := m.ctrlBoxOrigin()
+	contentX := x0 + 3
+	relY := msg2rel(msg.Y, y0)
+	vis := m.ctrlVisibleRows()
+
+	if relY >= 0 && relY < vis && len(m.ctrlSettings) > 0 {
+		row := m.ctrlOffset + relY
+		if row < len(m.ctrlSettings) {
+			m.ctrlCursor = row
+			relX := msg.X - contentX
+			switch {
+			case relX >= ctrlDecCol-1 && relX <= ctrlDecCol+1:
+				return m.ctrlStep(-1)
+			case relX >= ctrlIncCol-1 && relX <= ctrlIncCol+1:
+				return m.ctrlStep(1)
+			}
+			return m, nil
+		}
+	}
+
+	if relY == vis+1 {
+		m.ctrlCursor = m.ctrlTakeRow()
+		return m.ctrlCapture()
+	}
+
+	box := m.viewControlOverlay()
+	w, h := lipgloss.Width(box), lipgloss.Height(box)
+	if msg.X < x0 || msg.X >= x0+w || msg.Y < y0 || msg.Y >= y0+h {
+		m.ctrlOverlay = false
 	}
 	return m, nil
 }
@@ -368,7 +428,7 @@ func pad(s string, width int) string {
 // viewControlOverlay renders the camera control card.
 func (m Model) viewControlOverlay() string {
 	var b strings.Builder
-	b.WriteString(styleTitle.Render("Camera Control") + "\n\n")
+	b.WriteString(m.overlayHeader("Camera Control", ctrlIncCol+1) + "\n\n")
 
 	switch {
 	case m.ctrlLoading:
@@ -386,16 +446,20 @@ func (m Model) viewControlOverlay() string {
 		}
 	}
 
-	take := "  " + "[T] Take photo"
-	if m.ctrlCursor == m.ctrlTakeRow() {
-		take = styleRowCursor.Render("▸ [T] Take photo")
-	} else {
-		take = styleAccent.Render(take)
+	takeStyle := styleTakeBtn
+	switch {
+	case m.pressedZone == ctrlTakeID:
+		takeStyle = styleTakeBtnPress
+	case m.hoverZone == ctrlTakeID || m.ctrlCursor == m.ctrlTakeRow():
+		takeStyle = styleTakeBtnHover
 	}
-	b.WriteString("\n" + take + "\n\n")
-	b.WriteString(styleHelp.Render("↑/↓ select · ◀/▶ change · T take photo · esc close"))
+	b.WriteString("\n  " + takeStyle.Render("◉ Take Photo") + "\n\n")
+	b.WriteString(styleHelp.Render("click a value ◀ ▶ · ◉ take · ✕ close · keys optional"))
 
-	w := ctrlIncCol + 3
+	// The widest content line is a setting row ending at ctrlIncCol (the ▶
+	// column), i.e. ctrlIncCol+1 cells. styleOverlay pads two cells each side,
+	// so add four to keep the text area wide enough that nothing wraps.
+	w := ctrlIncCol + 1 + 4
 	if max := m.width - 6; w > max && max > 20 {
 		w = max
 	}
@@ -417,13 +481,22 @@ func (m Model) renderCtrlRow(i int) string {
 		value += " …"
 	}
 
-	var line string
 	if s.Writable && len(s.Choices) > 0 {
-		line = mark + pad(s.Label, ctrlLabelW) + "◀ " + pad(value, ctrlValueW) + " ▶"
-	} else {
-		line = mark + pad(s.Label, ctrlLabelW) + "  " + pad(value, ctrlValueW)
+		dec := m.stepperGlyph("◀", ctrlDecID(i))
+		inc := m.stepperGlyph("▶", ctrlIncID(i))
+		label := mark + pad(s.Label, ctrlLabelW)
+		val := pad(value, ctrlValueW)
+		if cursor {
+			label = styleRowCursor.Render(label)
+			val = styleRowCursor.Render(val)
+		} else {
+			label = styleRow.Render(label)
+			val = styleRow.Render(val)
+		}
+		return label + dec + " " + val + " " + inc
 	}
 
+	line := mark + pad(s.Label, ctrlLabelW) + "  " + pad(value, ctrlValueW)
 	switch {
 	case cursor:
 		return styleRowCursor.Render(line)
@@ -433,3 +506,22 @@ func (m Model) renderCtrlRow(i int) string {
 		return styleRow.Render(line)
 	}
 }
+
+// stepperGlyph renders a ◀/▶ stepper as a small clickable button, highlighted
+// on hover and inverted while pressed.
+func (m Model) stepperGlyph(glyph, id string) string {
+	style := styleStepper
+	switch {
+	case m.pressedZone == id:
+		style = styleStepperPress
+	case m.hoverZone == id:
+		style = styleStepperHover
+	}
+	return style.Render(glyph)
+}
+
+// Control-overlay hover/press zone ids.
+const ctrlTakeID = "ctrl_take"
+
+func ctrlDecID(i int) string { return "ctrl_dec_" + strconv.Itoa(i) }
+func ctrlIncID(i int) string { return "ctrl_inc_" + strconv.Itoa(i) }

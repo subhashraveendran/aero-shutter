@@ -17,13 +17,20 @@ import (
 const (
 	topBarHeight    = 1
 	bottomBarHeight = 3
-	helpBarHeight   = 1
-	paneChromeRows  = 3 // border top/bottom + title line
+	hintBarHeight   = 1 // "click anything · keys optional" discoverability line
+	paneChromeRows  = 4 // border top/bottom + title line + filter-chip row
 )
+
+// toolbarHeight is the number of screen rows the browser toolbar occupies at
+// the current terminal width (it wraps on narrow terminals).
+func (m Model) toolbarHeight() int {
+	_, lines := layoutToolbar(m.browserToolbar(), m.width, 0)
+	return lines
+}
 
 // listHeight is the number of file rows visible in the left pane.
 func (m Model) listHeight() int {
-	h := m.height - topBarHeight - bottomBarHeight - helpBarHeight - paneChromeRows
+	h := m.height - topBarHeight - bottomBarHeight - hintBarHeight - m.toolbarHeight() - paneChromeRows
 	if h < 1 {
 		return 1
 	}
@@ -108,7 +115,7 @@ func (m Model) viewConnect() string {
 		card.WriteString(styleErrText.Render("✗ "+m.connectErr) + "\n\n")
 	}
 	card.WriteString(m.ipInput.View() + "\n\n")
-	card.WriteString(styleHelp.Render("enter connect · tab manual IP · q quit"))
+	card.WriteString(styleHint.Render("click a button below · keys optional"))
 
 	cardW := min(m.width-4, 52)
 	sections = append(sections, styleConnectCard.Width(cardW).Render(card.String()))
@@ -126,7 +133,15 @@ func (m Model) viewConnect() string {
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Center, sections...)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	centered := lipgloss.Place(m.width, m.height-m.connectToolbarHeight(), lipgloss.Center, lipgloss.Center, content)
+	placed, lines := m.connectToolbarLayout()
+	return lipgloss.JoinVertical(lipgloss.Left, centered, m.renderToolbar(placed, lines))
+}
+
+// connectToolbarHeight is the number of screen rows the connect toolbar takes.
+func (m Model) connectToolbarHeight() int {
+	_, lines := layoutToolbar(m.connectToolbar(), m.width, 0)
+	return lines
 }
 
 // ---- Browser -----------------------------------------------------------
@@ -135,11 +150,15 @@ func (m Model) viewBrowser() string {
 	top := m.viewTopBar()
 	body := m.viewBody()
 	bottom := m.viewBottomBar()
-	help := m.viewHelp()
-	view := lipgloss.JoinVertical(lipgloss.Left, top, body, bottom, help)
+	hint := m.viewHint()
+	toolbar := m.viewToolbar()
+	view := lipgloss.JoinVertical(lipgloss.Left, top, body, bottom, hint, toolbar)
 
 	if m.ctrlOverlay {
 		return m.renderOverlay(view, m.viewControlOverlay())
+	}
+	if m.cheatOverlay {
+		return m.renderOverlay(view, m.viewCheatOverlay())
 	}
 	if m.previewOverlay {
 		return m.renderOverlay(view, m.viewPreviewOverlay())
@@ -148,6 +167,19 @@ func (m Model) viewBrowser() string {
 		return m.renderOverlay(view, m.viewDetailOverlay())
 	}
 	return view
+}
+
+// viewToolbar renders the clickable button toolbar at the bottom of the browser
+// screen. The buttons and their hit zones come from the same browserToolbar
+// slice, so a click always lands on the button under the cursor.
+func (m Model) viewToolbar() string {
+	placed, lines := m.browserToolbarLayout()
+	return m.renderToolbar(placed, lines)
+}
+
+// viewHint is the subtle discoverability line above the toolbar.
+func (m Model) viewHint() string {
+	return styleHint.MaxWidth(m.width).Render("click anything · keys optional")
 }
 
 func (m Model) viewTopBar() string {
@@ -184,7 +216,7 @@ func (m Model) viewTopBar() string {
 }
 
 func (m Model) viewBody() string {
-	bodyH := m.height - topBarHeight - bottomBarHeight - helpBarHeight
+	bodyH := m.height - topBarHeight - bottomBarHeight - hintBarHeight - m.toolbarHeight()
 	if bodyH < 5 {
 		bodyH = 5
 	}
@@ -204,14 +236,23 @@ func (m Model) viewBody() string {
 
 func (m Model) viewFileList(w, h int) string {
 	files := m.visibleFiles()
-	filter := listFilters[m.filterIdx]
-	title := stylePaneTitle.Render(fmt.Sprintf(" Files · filter: %s (%d) ", filter, len(files)))
 
 	rows := make([]string, 0, h)
-	rows = append(rows, title)
-	visible := h - 1
+	rows = append(rows, stylePaneTitle.Render(fmt.Sprintf(" Files (%d) ", len(files))))
+	rows = append(rows, m.renderFilterChips())
+
+	// One line each is reserved for the top/bottom "more" indicators; the
+	// list body gets whatever is left.
+	visible := h - 2 - 2
 	if visible < 1 {
 		visible = 1
+	}
+
+	// Top overflow indicator.
+	if m.offset > 0 {
+		rows = append(rows, m.renderMoreIndicator(true))
+	} else {
+		rows = append(rows, "")
 	}
 
 	if m.refreshing && len(files) == 0 {
@@ -224,13 +265,38 @@ func (m Model) viewFileList(w, h int) string {
 	for i := m.offset; i < end; i++ {
 		rows = append(rows, m.renderRow(files[i], i == m.cursor, w))
 	}
+
+	// Pad so the bottom indicator sits at a stable row.
+	for len(rows) < h-1 {
+		rows = append(rows, "")
+	}
+	// Bottom overflow indicator.
+	if end < len(files) {
+		rows = append(rows, m.renderMoreIndicator(false))
+	} else {
+		rows = append(rows, "")
+	}
 	return strings.Join(rows, "\n")
 }
 
+// renderMoreIndicator renders the clickable "▲ more / ▼ more" overflow hint,
+// highlighted while hovered.
+func (m Model) renderMoreIndicator(top bool) string {
+	id, text := moreDownID, "  ▼ more"
+	if top {
+		id, text = moreUpID, "  ▲ more"
+	}
+	style := styleDimText
+	if m.hoverZone == id {
+		style = styleAccent.Bold(true)
+	}
+	return style.Render(text)
+}
+
 func (m Model) renderRow(f camera.File, cursor bool, w int) string {
-	check := "  "
+	check := styleDimText.Render("☐ ")
 	if m.selected[f.Handle] {
-		check = styleCheckOn.Render("✓ ")
+		check = styleCheckOn.Render("☑ ")
 	}
 	badge := formatBadge(f.Format)
 	mark := "  "
@@ -254,6 +320,9 @@ func (m Model) renderRow(f camera.File, cursor bool, w int) string {
 	if cursor {
 		return styleRowCursor.MaxWidth(w).Render("▸" + line)
 	}
+	if m.hoverZone == rowID(f.Handle) {
+		return styleRowHover.MaxWidth(w).Render(" " + line)
+	}
 	if m.imported[database.Key(f.Handle, f.Name, f.Size)] {
 		return styleRowImported.MaxWidth(w).Render(" " + line)
 	}
@@ -275,7 +344,17 @@ func formatBadge(f ptpip.ObjectFormat) string {
 
 func (m Model) viewPreview(w, h int) string {
 	var b strings.Builder
-	b.WriteString(stylePaneTitle.Render(" Preview ") + "\n")
+	enlarge := " ⤢ Enlarge "
+	enlargeStyle := styleChip
+	if m.hoverZone == enlargeID {
+		enlargeStyle = styleChipHover
+	}
+	title := stylePaneTitle.Render(" Preview ")
+	gap := w - lipgloss.Width(title) - lipgloss.Width(enlarge)
+	if gap < 1 {
+		gap = 1
+	}
+	b.WriteString(title + strings.Repeat(" ", gap) + enlargeStyle.Render(enlarge) + "\n")
 
 	f, ok := m.currentFile()
 	if !ok {
@@ -379,14 +458,6 @@ func (m Model) viewBottomBar() string {
 	return lipgloss.JoinVertical(lipgloss.Left, "", status, toast)
 }
 
-// helpText is the browser help bar. The footer hit zones in mouse.go are
-// computed from this same string, so the two always stay in sync.
-const helpText = "q quit · r refresh · i import new · a import all · space select · S import selected · f filter · P preview · D details · O open · s settings · c camera · t camera · w watch"
-
-func (m Model) viewHelp() string {
-	return styleHelp.MaxWidth(m.width).Render(helpText)
-}
-
 // ---- Overlays ----------------------------------------------------------
 
 // renderOverlay draws box centered over base by overlaying it on a dimmed
@@ -404,15 +475,58 @@ func (m Model) viewPreviewOverlay() string {
 	w := m.width * 3 / 4
 	h := m.height * 3 / 4
 	var b strings.Builder
-	b.WriteString(styleTitle.Render(f.Name) + "\n\n")
+	b.WriteString(m.overlayHeader(f.Name, w-4) + "\n\n")
 	b.WriteString(m.renderThumb(f.Handle, w-6, max(4, h-8)))
-	b.WriteString(styleHelp.Render("esc close"))
+	b.WriteString(styleHelp.Render("click ✕ or outside to close · esc"))
 	return styleOverlay.Width(w).Render(b.String())
 }
 
 func (m Model) viewDetailOverlay() string {
-	title := styleTitle.Render("Metadata") + "\n\n"
-	return styleOverlay.Render(title + m.detailView.View() + "\n\n" + styleHelp.Render("↑/↓ scroll · esc close"))
+	header := m.overlayHeader("Metadata", m.detailView.Width) + "\n\n"
+	return styleOverlay.Render(header + m.detailView.View() + "\n\n" + styleHelp.Render("↑/↓ scroll · click ✕ or outside to close"))
+}
+
+// overlayHeader renders an overlay title with a clickable ✕ close button pushed
+// to the right edge. The close glyph highlights while hovered.
+func (m Model) overlayHeader(title string, innerW int) string {
+	t := styleTitle.Render(title)
+	closeStyle := styleDimText
+	if m.hoverZone == closeID {
+		closeStyle = styleErrText.Bold(true)
+	}
+	x := closeStyle.Render("✕")
+	gap := innerW - lipgloss.Width(t) - 1
+	if gap < 1 {
+		gap = 1
+	}
+	return t + strings.Repeat(" ", gap) + x
+}
+
+// viewCheatOverlay renders the keybindings cheatsheet toggled by the "?" button.
+func (m Model) viewCheatOverlay() string {
+	boxW := min(m.width-4, 52)
+	var b strings.Builder
+	b.WriteString(m.overlayHeader("Keyboard shortcuts (all optional)", boxW-4) + "\n\n")
+	rows := [][2]string{
+		{"↑/↓ k/j", "move cursor"},
+		{"space", "toggle selection"},
+		{"enter / dbl-click", "preview"},
+		{"r", "refresh"},
+		{"i / a", "import new / all"},
+		{"S", "import selected"},
+		{"f", "cycle filter"},
+		{"P / D", "preview / details"},
+		{"O", "open imported file"},
+		{"s", "settings"},
+		{"c / t", "switch camera / control"},
+		{"w", "watch mode"},
+		{"? / esc", "toggle this · close"},
+	}
+	for _, r := range rows {
+		b.WriteString(fmt.Sprintf("%s  %s\n", styleAccent.Render(fmt.Sprintf("%-18s", r[0])), styleSubtle.Render(r[1])))
+	}
+	b.WriteString("\n" + styleHint.Render("Tip: click anything — keys are just shortcuts."))
+	return styleOverlay.Width(boxW).Render(b.String())
 }
 
 // detailContent builds the metadata text for the detail overlay.
@@ -473,8 +587,12 @@ func (m Model) viewSettings() string {
 	b.WriteString(label(1, "Camera IP") + m.setInputs[1].View() + "\n")
 	b.WriteString(label(2, "Auto-import") + toggle(m.setAuto) + "\n")
 	b.WriteString(label(3, "Open after import") + toggle(m.setOpen) + "\n\n")
+	b.WriteString(styleHint.Render("click a field, toggle, or button · keys optional") + "\n\n")
+
+	placed, lines := m.settingsToolbarLayout(0)
+	b.WriteString(m.renderToolbar(placed, lines) + "\n\n")
 	b.WriteString(styleHelp.Render("tab next · space toggle · enter save · esc cancel"))
 
-	box := styleOverlay.Width(min(m.width-4, 80)).Render(b.String())
+	box := styleSettingsCard.Width(min(m.width-4, 80)).Render(b.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }

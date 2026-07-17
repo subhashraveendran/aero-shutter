@@ -69,6 +69,12 @@ var (
 	styleRow         = lipgloss.NewStyle().Foreground(colorText)
 	styleRowImported = lipgloss.NewStyle().Foreground(colorDim)
 
+	// styleRowHover lightly tints the row under the mouse (distinct from the
+	// stronger cursor highlight).
+	styleRowHover = lipgloss.NewStyle().
+			Foreground(colorText).
+			Background(lipgloss.Color("#232842"))
+
 	styleBadgeNEF = lipgloss.NewStyle().Foreground(lipgloss.Color("#1a1b26")).Background(colorWarn).Padding(0, 1)
 	styleBadgeJPG = lipgloss.NewStyle().Foreground(lipgloss.Color("#1a1b26")).Background(colorAccent).Padding(0, 1)
 	styleBadgeMOV = lipgloss.NewStyle().Foreground(lipgloss.Color("#1a1b26")).Background(lipgloss.Color("#bb9af7")).Padding(0, 1)
@@ -117,4 +123,82 @@ var (
 	styleFieldLabel = lipgloss.NewStyle().Foreground(colorSubtle).Width(22)
 
 	styleFieldFocus = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Width(22)
+
+	styleSettingsCard = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colorAccent).
+				Padding(1, 2)
+)
+
+// Styles for the clickable toolbar buttons. Chips pad one cell each side; the
+// layout math in toolbar.go assumes exactly that padding.
+var (
+	// styleTbBtn is the resting button chip: inverted surface, bold text.
+	styleTbBtn = lipgloss.NewStyle().
+			Foreground(colorText).
+			Background(colorSurface).
+			Padding(0, 1)
+
+	// styleTbBtnHover brightens the chip when the mouse is over it.
+	styleTbBtnHover = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#1a1b26")).
+			Background(colorAccent).
+			Bold(true).
+			Padding(0, 1)
+
+	// styleTbBtnPress inverts the chip while the button is held down.
+	styleTbBtnPress = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#1a1b26")).
+			Background(colorText).
+			Bold(true).
+			Padding(0, 1)
+)
+
+// Styles for the clickable filter chips row.
+var (
+	styleChip = lipgloss.NewStyle().
+			Foreground(colorSubtle).
+			Padding(0, 1)
+
+	styleChipActive = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#1a1b26")).
+			Background(colorAccent).
+			Bold(true).
+			Padding(0, 1)
+
+	styleChipHover = lipgloss.NewStyle().
+			Foreground(colorText).
+			Background(lipgloss.Color("#2f3549")).
+			Padding(0, 1)
+)
+
+// styleHint is the subtle "click anything · keys optional" discoverability line.
+var styleHint = lipgloss.NewStyle().Foreground(colorDim).Italic(true).Padding(0, 1)
+
+// Styles for the clickable ◀ ▶ value steppers in the camera control overlay.
+var (
+	styleStepper      = lipgloss.NewStyle().Foreground(colorAccent)
+	styleStepperHover = lipgloss.NewStyle().Foreground(lipgloss.Color("#1a1b26")).Background(colorAccent).Bold(true)
+	styleStepperPress = lipgloss.NewStyle().Foreground(lipgloss.Color("#1a1b26")).Background(colorText).Bold(true)
+)
+
+// Styles for the big "◉ Take Photo" button in the camera control overlay.
+var (
+	styleTakeBtn = lipgloss.NewStyle().
+			Foreground(colorText).
+			Background(colorSurface).
+			Bold(true).
+			Padding(0, 2)
+
+	styleTakeBtnHover = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1a1b26")).
+				Background(colorGood).
+				Bold(true).
+				Padding(0, 2)
+
+	styleTakeBtnPress = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1a1b26")).
+				Background(colorText).
+				Bold(true).
+				Padding(0, 2)
 )

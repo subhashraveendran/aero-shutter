@@ -1,0 +1,9 @@
+node_modules
+dist
+ios/App/Pods
+ios/App/App/public
+android/app/src/main/assets/public
+.DS_Store
+*.log
+.vite
+coverage
