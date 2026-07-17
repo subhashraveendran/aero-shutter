@@ -50,29 +50,80 @@ func (m Model) View() string {
 
 // ---- Connect screen ----------------------------------------------------
 
-func (m Model) viewConnect() string {
-	var b strings.Builder
-	b.WriteString(styleTitle.Render("aero-shutter") + styleDimText.Render("  ·  Wi-Fi photo importer for the Nikon D5300") + "\n\n")
+// asciiLogo is the AERO-SHUTTER wordmark, one string per row. It is 39 cells
+// wide; below narrowLogoWidth the plain title is shown instead.
+var asciiLogo = []string{
+	"┌─┐┌─┐┬─┐┌─┐   ┌─┐┬ ┬┬ ┬┌┬┐┌┬┐┌─┐┬─┐",
+	"├─┤├┤ ├┬┘│ │───└─┐├─┤│ │ │  │ ├┤ ├┬┘",
+	"┴ ┴└─┘┴└─└─┘   └─┘┴ ┴└─┘ ┴  ┴ └─┘┴└─",
+}
 
+// narrowLogoWidth is the terminal width below which the big wordmark is
+// replaced by a plain one-line title.
+const narrowLogoWidth = 60
+
+// connectSteps is the "How to connect" walkthrough shown on the connect
+// screen.
+var connectSteps = []string{
+	"Camera: MENU → Setup → Wi-Fi → Enable",
+	"Computer: join Wi-Fi \"Nikon_WU2_…\"",
+	"aero-shutter finds it automatically",
+}
+
+// connectNote reminds users that the camera's Wi-Fi replaces their normal
+// network connection.
+const connectNote = "Joining the camera's Wi-Fi disconnects normal internet — " +
+	"use Ethernet or a USB Wi-Fi adapter to stay online."
+
+func (m Model) viewConnect() string {
+	var sections []string
+
+	// Wordmark with a vertical gradient; plain title on narrow terminals.
+	if m.width >= narrowLogoWidth {
+		rows := make([]string, len(asciiLogo))
+		for i, line := range asciiLogo {
+			rows[i] = lipgloss.NewStyle().Foreground(logoColors[i%len(logoColors)]).Bold(true).Render(line)
+		}
+		sections = append(sections, strings.Join(rows, "\n"))
+	} else {
+		sections = append(sections, styleTitle.Render("aero-shutter"))
+	}
+	sections = append(sections, styleTagline.Render("Wi-Fi photo importer for Nikon"), "")
+
+	// Status card: spinner, error, manual IP input and key hints.
+	var card strings.Builder
 	switch {
 	case m.detecting:
-		b.WriteString(m.spin.View() + " scanning for camera (default IP + local subnets)…\n")
+		card.WriteString(m.spin.View() + " Searching for camera…")
 	case m.connecting:
-		b.WriteString(m.spin.View() + " connecting…\n")
+		card.WriteString(m.spin.View() + " Connecting…")
 	default:
-		b.WriteString(styleSubtle.Render("No camera connected.") + "\n")
+		card.WriteString(styleSubtle.Render("No camera connected."))
 	}
-	b.WriteString("\n")
-
+	card.WriteString("\n\n")
 	if m.connectErr != "" {
-		b.WriteString(styleErrText.Render("✗ "+m.connectErr) + "\n\n")
+		card.WriteString(styleErrText.Render("✗ "+m.connectErr) + "\n\n")
+	}
+	card.WriteString(m.ipInput.View() + "\n\n")
+	card.WriteString(styleHelp.Render("enter connect · tab manual IP · q quit"))
+
+	cardW := min(m.width-4, 52)
+	sections = append(sections, styleConnectCard.Width(cardW).Render(card.String()))
+
+	// The walkthrough and the note are dropped on small terminals so the
+	// card always stays visible.
+	if m.height >= 20 && m.width >= narrowLogoWidth {
+		stepLines := []string{styleSubtle.Bold(true).Render("How to connect")}
+		for i, s := range connectSteps {
+			stepLines = append(stepLines,
+				fmt.Sprintf("%s  %s", styleStepNum.Render(fmt.Sprintf(" %d", i+1)), styleStepText.Render(s)))
+		}
+		sections = append(sections, "", lipgloss.JoinVertical(lipgloss.Left, stepLines...))
+		sections = append(sections, "", styleNote.Width(cardW).Align(lipgloss.Center).Render(connectNote))
 	}
 
-	b.WriteString(m.ipInput.View() + "\n\n")
-	b.WriteString(styleHelp.Render("enter connect · d re-detect · m manual ip · q quit"))
-
-	box := styleOverlay.Width(min(m.width-4, 72)).Render(b.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+	content := lipgloss.JoinVertical(lipgloss.Center, sections...)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
 // ---- Browser -----------------------------------------------------------
@@ -235,17 +286,7 @@ func (m Model) viewPreview(w, h int) string {
 	}
 	imgCols := w - 2
 
-	if m.proto != thumbnail.ProtocolNone && m.thumbHandle == f.Handle && len(m.thumbData) > 0 {
-		img := thumbnail.RenderInline(m.proto, m.thumbData, imgCols, imgRows)
-		if img != "" {
-			b.WriteString(img)
-			b.WriteString(strings.Repeat("\n", imgRows))
-		} else {
-			b.WriteString(thumbnail.Placeholder(imgCols, imgRows) + "\n")
-		}
-	} else {
-		b.WriteString(thumbnail.Placeholder(imgCols, imgRows) + "\n")
-	}
+	b.WriteString(m.renderThumb(f.Handle, imgCols, imgRows))
 
 	meta := [][2]string{
 		{"Name", f.Name},
@@ -263,6 +304,25 @@ func (m Model) viewPreview(w, h int) string {
 		b.WriteString(fmt.Sprintf("%s %s\n", styleSubtle.Render(fmt.Sprintf("%9s", kv[0]+":")), kv[1]))
 	}
 	return b.String()
+}
+
+// renderThumb renders the thumbnail for handle into a cols x rows cell box,
+// followed by the padding lines the layout needs. Inline protocols (Kitty,
+// iTerm2) draw over the box with escape sequences, the half-block fallback
+// produces real text lines, and a placeholder covers missing thumbnails and
+// decode failures.
+func (m Model) renderThumb(handle uint32, cols, rows int) string {
+	if m.proto != thumbnail.ProtocolNone && m.thumbHandle == handle && len(m.thumbData) > 0 {
+		if img := thumbnail.RenderInline(m.proto, m.thumbData, cols, rows); img != "" {
+			if m.proto.Inline() {
+				// The escape sequence occupies no layout lines itself.
+				return img + strings.Repeat("\n", rows)
+			}
+			lines := strings.Count(img, "\n") + 1
+			return img + strings.Repeat("\n", max(1, rows-lines+1))
+		}
+	}
+	return thumbnail.Placeholder(cols, rows) + "\n"
 }
 
 func formatTime(f camera.File) string {
@@ -340,19 +400,7 @@ func (m Model) viewPreviewOverlay() string {
 	h := m.height * 3 / 4
 	var b strings.Builder
 	b.WriteString(styleTitle.Render(f.Name) + "\n\n")
-	if m.proto != thumbnail.ProtocolNone && m.thumbHandle == f.Handle && len(m.thumbData) > 0 {
-		img := thumbnail.RenderInline(m.proto, m.thumbData, w-6, h-8)
-		if img != "" {
-			b.WriteString(img)
-			b.WriteString(strings.Repeat("\n", max(1, h-8)))
-		} else {
-			b.WriteString(thumbnail.Placeholder(w-6, h-8))
-			b.WriteString("\n")
-		}
-	} else {
-		b.WriteString(thumbnail.Placeholder(w-6, h-8))
-		b.WriteString("\n")
-	}
+	b.WriteString(m.renderThumb(f.Handle, w-6, max(4, h-8)))
 	b.WriteString(styleHelp.Render("esc close"))
 	return styleOverlay.Width(w).Render(b.String())
 }

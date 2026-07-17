@@ -16,8 +16,8 @@ func TestDetectProtocol(t *testing.T) {
 		{"wezterm", map[string]string{"TERM_PROGRAM": "WezTerm"}, ProtocolKitty},
 		{"ghostty", map[string]string{"TERM_PROGRAM": "ghostty"}, ProtocolKitty},
 		{"iterm2", map[string]string{"TERM_PROGRAM": "iTerm.app"}, ProtocolITerm2},
-		{"plain xterm", map[string]string{"TERM": "xterm-256color"}, ProtocolNone},
-		{"empty env", nil, ProtocolNone},
+		{"plain xterm", map[string]string{"TERM": "xterm-256color"}, ProtocolHalfBlock},
+		{"empty env", nil, ProtocolHalfBlock},
 	}
 	for _, tc := range cases {
 		getenv := func(k string) string { return tc.env[k] }

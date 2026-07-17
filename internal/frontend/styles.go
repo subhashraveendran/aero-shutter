@@ -84,6 +84,29 @@ var (
 	styleTitle    = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 )
 
+// Styles for the connect screen.
+var (
+	// logoColors paint the wordmark rows top to bottom, forming a soft
+	// cyan → blue → purple gradient that reads well on dark terminals.
+	logoColors = []lipgloss.Color{
+		lipgloss.Color("#7dcfff"),
+		lipgloss.Color("#7aa2f7"),
+		lipgloss.Color("#bb9af7"),
+	}
+
+	styleTagline = lipgloss.NewStyle().Foreground(colorSubtle)
+
+	styleConnectCard = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colorAccent).
+				Padding(1, 2)
+
+	styleStepNum  = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleStepText = lipgloss.NewStyle().Foreground(colorSubtle)
+
+	styleNote = lipgloss.NewStyle().Foreground(colorDim).Italic(true)
+)
+
 // Styles for overlays and forms.
 var (
 	styleOverlay = lipgloss.NewStyle().

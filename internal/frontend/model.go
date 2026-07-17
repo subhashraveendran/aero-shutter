@@ -240,7 +240,7 @@ func (m Model) updateConnect(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.connectErr = ""
 				return m, tea.Batch(m.spin.Tick, detectCmd(m.cfg.CameraIP, m.cfg.LastConnected, camera.D5300Profile.DefaultIP))
 			}
-		case "m", "i":
+		case "tab", "m", "i":
 			if !m.ipInput.Focused() {
 				return m, m.ipInput.Focus()
 			}

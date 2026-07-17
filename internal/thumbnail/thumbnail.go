@@ -1,6 +1,7 @@
 // Package thumbnail fetches embedded JPEG thumbnails over PTP and renders
-// them inline in terminals that support the Kitty or iTerm2 graphics
-// protocols, with an LRU cache so thumbnails are fetched at most once.
+// them in the terminal: inline via the Kitty or iTerm2 graphics protocols
+// where available, and as ANSI half-block cells everywhere else, with an
+// LRU cache so thumbnails are fetched at most once.
 package thumbnail
 
 import (

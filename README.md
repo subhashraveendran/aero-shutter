@@ -42,7 +42,8 @@ terminal UI in the spirit of lazygit and btop.
   on capture date (configurable).
 - **Thumbnails in your terminal** — embedded JPEG previews rendered inline via
   the Kitty graphics protocol (Kitty, WezTerm, Ghostty) or iTerm2 inline
-  images, with a clean placeholder everywhere else.
+  images, with an ANSI half-block renderer as a universal fallback so
+  previews work in every color terminal, including macOS Terminal.app.
 - **Auto-detection** — probes the D5300's default address and quickly scans
   your local /24 for a camera when it isn't there.
 - **Watch mode** — poll the camera every 5 seconds and (optionally)
@@ -80,6 +81,29 @@ The D5300 hosts its own Wi-Fi network:
 
 Only one client can talk to the camera at a time — close the Nikon mobile app
 if it is connected.
+
+## Staying online while connected to the camera
+
+The D5300 does not join your home network — it is a Wi-Fi **access point** of
+its own. A Wi-Fi radio can only be associated with one network at a time, so
+the moment your computer joins `Nikon_WU2_…`, your normal Wi-Fi internet
+connection drops. That is a limitation of single-radio Wi-Fi hardware, not of
+the camera or of aero-shutter.
+
+The fix is a second network interface:
+
+- **Ethernet (or a USB-C dock with an Ethernet port)** — plug into your
+  router for internet and point the built-in Wi-Fi at the camera. Simplest
+  and most reliable option for laptops.
+- **A cheap USB Wi-Fi adapter dedicated to the camera** — keep the built-in
+  Wi-Fi on your home network and let the adapter join `Nikon_WU2_…`.
+- **Two adapters on a desktop** — desktops without built-in Wi-Fi can run one
+  adapter on the home network and one on the camera.
+
+No routing configuration is needed: aero-shutter probes every candidate
+address and finds the camera on whichever interface sits on the camera's
+subnet (`192.168.1.x` by default), regardless of which interface carries
+your internet traffic.
 
 ## Usage
 

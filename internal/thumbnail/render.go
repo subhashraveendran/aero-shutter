@@ -29,13 +29,16 @@ type Protocol int
 
 // Supported inline-image protocols.
 const (
-	// ProtocolNone means the terminal has no known image support; callers
-	// should render a placeholder instead.
+	// ProtocolNone means no rendering at all; callers should render a
+	// placeholder instead.
 	ProtocolNone Protocol = iota
 	// ProtocolKitty is the Kitty graphics protocol (Kitty, WezTerm, Ghostty).
 	ProtocolKitty
 	// ProtocolITerm2 is the iTerm2 OSC 1337 inline image protocol.
 	ProtocolITerm2
+	// ProtocolHalfBlock draws the image with ANSI-colored '▀' half-block
+	// cells. It works in any color terminal and is the universal fallback.
+	ProtocolHalfBlock
 )
 
 // String returns the protocol name.
@@ -45,13 +48,24 @@ func (p Protocol) String() string {
 		return "kitty"
 	case ProtocolITerm2:
 		return "iterm2"
+	case ProtocolHalfBlock:
+		return "halfblock"
 	default:
 		return "none"
 	}
 }
 
+// Inline reports whether the protocol draws via terminal escape sequences
+// that occupy no layout lines of their own (Kitty, iTerm2), as opposed to
+// the half-block renderer whose output is ordinary text lines.
+func (p Protocol) Inline() bool {
+	return p == ProtocolKitty || p == ProtocolITerm2
+}
+
 // DetectProtocol inspects the environment ($TERM, $TERM_PROGRAM,
-// $KITTY_WINDOW_ID, ...) and returns the best supported protocol.
+// $KITTY_WINDOW_ID, ...) and returns the best supported protocol,
+// preferring Kitty, then iTerm2, then the always-available half-block
+// renderer.
 func DetectProtocol() Protocol {
 	return detectProtocol(os.Getenv)
 }
@@ -76,15 +90,17 @@ func detectProtocol(getenv func(string) string) Protocol {
 	if prog == "mintty" {
 		return ProtocolITerm2
 	}
-	return ProtocolNone
+	return ProtocolHalfBlock
 }
 
 // kittyChunkSize is the maximum base64 payload per Kitty APC chunk.
 const kittyChunkSize = 4096
 
 // RenderInline returns the escape sequence that draws the JPEG at the cursor
-// position sized to the given cell box, using the specified protocol. It
-// returns "" for ProtocolNone or empty data.
+// position sized to the given cell box, using the specified protocol. For
+// ProtocolHalfBlock the result is plain text lines (one per cell row, each
+// ending with an SGR reset). It returns "" for ProtocolNone, empty data or a
+// thumbnail that cannot be decoded, letting the caller show a placeholder.
 func RenderInline(proto Protocol, jpeg []byte, cols, rows int) string {
 	if len(jpeg) == 0 {
 		return ""
@@ -94,6 +110,8 @@ func RenderInline(proto Protocol, jpeg []byte, cols, rows int) string {
 		return renderKitty(jpeg, cols, rows)
 	case ProtocolITerm2:
 		return renderITerm2(jpeg, cols, rows)
+	case ProtocolHalfBlock:
+		return renderHalfBlock(jpeg, cols, rows, detectTruecolor(os.Getenv))
 	default:
 		return ""
 	}
