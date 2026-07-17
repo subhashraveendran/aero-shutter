@@ -35,6 +35,7 @@ var footerShortcuts = []struct{ label, key string }{
 	{"f filter", "f"},
 	{"s settings", "s"},
 	{"c camera", "c"},
+	{"t camera", "t"},
 }
 
 // footerZones computes the clickable spans of the help bar from the same
@@ -135,6 +136,9 @@ func (m *Model) scrollList(delta int) {
 // over the file list, row clicks (select, toggle, double-click preview) and
 // clicks on the help-bar shortcuts.
 func (m Model) browserMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.ctrlOverlay {
+		return m.controlMouse(msg)
+	}
 	if m.previewOverlay || m.detailOverlay {
 		// Wheel input over an overlay is ignored; a click closes it.
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {

@@ -49,6 +49,15 @@ terminal UI in the spirit of lazygit and btop.
 - **Mouse support** — scroll the file list with the wheel, click rows to move
   the cursor, click again to select, double-click for the large preview, and
   click the help-bar shortcuts.
+- **Camera control** — press `t` to open a control panel that shows live
+  camera settings (mode, aperture, shutter speed, ISO, exposure compensation,
+  white balance, capture mode, battery), lets you step writable values with
+  `◀`/`▶`, and triggers the shutter remotely (`T`). After a capture the file
+  list refreshes automatically so the new photo appears. Wi-Fi remote control
+  support varies by Nikon body — the D5300's WU-1a-era Wi-Fi may reject some
+  or all of it; everything degrades gracefully (unsupported settings are
+  hidden, read-only ones are dimmed, and a clear message is shown if the body
+  refuses remote capture).
 - **Multiple cameras** — the scan finds every camera on your subnets; a picker
   lists saved and discovered bodies, and `c` switches cameras at any time.
 - **Auto-detection** — probes the configured/default addresses and quickly
@@ -148,6 +157,8 @@ updated automatically on every successful connection.
 | `O`      | open the imported file with the OS viewer     |
 | `s`      | settings                                      |
 | `c`      | switch camera (disconnect, back to picker)    |
+| `t`      | camera control panel (settings + remote shutter) |
+| `T`      | take a photo (while the control panel is open) |
 | `w`      | toggle watch mode (poll camera every 5s)      |
 | `x`/`esc`| cancel a running import                       |
 | `↑↓`/`jk`| move the cursor                               |
@@ -161,7 +172,11 @@ updated automatically on every successful connection.
 | click on the cursor row | toggle its selection checkbox (same as `space`)       |
 | double-click on a row | open the large preview overlay (same as `P`)            |
 | click in an overlay   | close the overlay                                       |
-| click a help-bar label | trigger that shortcut (`q`, `r`, `i`, `a`, `f`, `s`, `c`) |
+| click a help-bar label | trigger that shortcut (`q`, `r`, `i`, `a`, `f`, `s`, `c`, `t`) |
+
+In the camera control panel the wheel scrolls the setting rows, a click
+selects a row, clicking the `◀`/`▶` arrows steps the value, and clicking
+"Take photo" fires the shutter.
 
 On the connect screen the camera picker is mouse-aware too: click an entry to
 connect, scroll to move the selection.

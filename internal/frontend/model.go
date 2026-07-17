@@ -89,6 +89,14 @@ type Model struct {
 	detailOverlay  bool
 	detailView     viewport.Model
 
+	// Camera control overlay.
+	ctrlOverlay  bool
+	ctrlLoading  bool
+	ctrlPending  bool // a SetDevicePropValue is in flight
+	ctrlSettings []camera.Setting
+	ctrlCursor   int
+	ctrlOffset   int
+
 	// Settings form.
 	setInputs [2]textinput.Model // save folder, camera IP
 	setAuto   bool
@@ -359,6 +367,9 @@ func (m Model) startDetect() (tea.Model, tea.Cmd) {
 // ---- Browser screen ----------------------------------------------------
 
 func (m Model) updateBrowser(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if mm, cmd, handled := m.handleControlMsg(msg); handled {
+		return mm, cmd
+	}
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return m.browserKey(msg)
@@ -424,6 +435,10 @@ func (m Model) updateBrowser(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) browserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+
+	if m.ctrlOverlay {
+		return m.controlKey(msg)
+	}
 
 	// Overlays swallow most keys.
 	if m.previewOverlay || m.detailOverlay {
@@ -529,6 +544,11 @@ func (m Model) browserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.showToast("finish or cancel the import first", false)
 		}
 		return m.switchCamera()
+	case "t":
+		if m.importing {
+			return m.showToast("finish or cancel the import first", false)
+		}
+		return m.openControl()
 	case "w":
 		m.watch = !m.watch
 		if m.watch {
@@ -559,6 +579,9 @@ func (m Model) switchCamera() (tea.Model, tea.Cmd) {
 	m.thumbHandle, m.thumbData = 0, nil
 	m.watch = false
 	m.previewOverlay, m.detailOverlay = false, false
+	m.ctrlOverlay, m.ctrlLoading, m.ctrlPending = false, false, false
+	m.ctrlSettings = nil
+	m.ctrlCursor, m.ctrlOffset = 0, 0
 	m.screen = screenConnect
 	return m.startDetect()
 }

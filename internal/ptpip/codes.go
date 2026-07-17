@@ -69,17 +69,20 @@ type OpCode uint16
 
 // PTP operation codes used by aero-shutter.
 const (
-	OpGetDeviceInfo    OpCode = 0x1001
-	OpOpenSession      OpCode = 0x1002
-	OpCloseSession     OpCode = 0x1003
-	OpGetStorageIDs    OpCode = 0x1004
-	OpGetStorageInfo   OpCode = 0x1005
-	OpGetObjectHandles OpCode = 0x1007
-	OpGetObjectInfo    OpCode = 0x1008
-	OpGetObject        OpCode = 0x1009
-	OpGetThumb         OpCode = 0x100A
-	OpGetDevicePropVal OpCode = 0x1015
-	OpGetPartialObject OpCode = 0x101B
+	OpGetDeviceInfo     OpCode = 0x1001
+	OpOpenSession       OpCode = 0x1002
+	OpCloseSession      OpCode = 0x1003
+	OpGetStorageIDs     OpCode = 0x1004
+	OpGetStorageInfo    OpCode = 0x1005
+	OpGetObjectHandles  OpCode = 0x1007
+	OpGetObjectInfo     OpCode = 0x1008
+	OpGetObject         OpCode = 0x1009
+	OpGetThumb          OpCode = 0x100A
+	OpInitiateCapture   OpCode = 0x100E
+	OpGetDevicePropDesc OpCode = 0x1014
+	OpGetDevicePropVal  OpCode = 0x1015
+	OpSetDevicePropVal  OpCode = 0x1016
+	OpGetPartialObject  OpCode = 0x101B
 
 	// OpNikonGetLargeThumb is the Nikon vendor operation returning a larger
 	// (~640px) JPEG preview than the standard GetThumb thumbnail. Not every
@@ -191,7 +194,14 @@ type DevicePropCode uint16
 
 // Device property codes used by aero-shutter.
 const (
-	PropBatteryLevel DevicePropCode = 0x5001
+	PropBatteryLevel        DevicePropCode = 0x5001
+	PropWhiteBalance        DevicePropCode = 0x5005
+	PropFNumber             DevicePropCode = 0x5007
+	PropExposureTime        DevicePropCode = 0x500D
+	PropExposureProgramMode DevicePropCode = 0x500E
+	PropExposureIndex       DevicePropCode = 0x500F
+	PropExposureBias        DevicePropCode = 0x5010
+	PropStillCaptureMode    DevicePropCode = 0x5013
 )
 
 // PTPError is an error carrying a PTP response code.

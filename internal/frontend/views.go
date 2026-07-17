@@ -138,6 +138,9 @@ func (m Model) viewBrowser() string {
 	help := m.viewHelp()
 	view := lipgloss.JoinVertical(lipgloss.Left, top, body, bottom, help)
 
+	if m.ctrlOverlay {
+		return m.renderOverlay(view, m.viewControlOverlay())
+	}
 	if m.previewOverlay {
 		return m.renderOverlay(view, m.viewPreviewOverlay())
 	}
@@ -378,7 +381,7 @@ func (m Model) viewBottomBar() string {
 
 // helpText is the browser help bar. The footer hit zones in mouse.go are
 // computed from this same string, so the two always stay in sync.
-const helpText = "q quit · r refresh · i import new · a import all · space select · S import selected · f filter · P preview · D details · O open · s settings · c camera · w watch"
+const helpText = "q quit · r refresh · i import new · a import all · space select · S import selected · f filter · P preview · D details · O open · s settings · c camera · t camera · w watch"
 
 func (m Model) viewHelp() string {
 	return styleHelp.MaxWidth(m.width).Render(helpText)
