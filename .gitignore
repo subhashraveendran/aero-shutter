@@ -1,0 +1,16 @@
+# Binaries and build output
+/aero-shutter
+/aero-shutter.exe
+dist/
+
+# Partial downloads
+*.part
+
+# Local databases
+*.db
+*.db-wal
+*.db-shm
+
+# Editor and OS noise
+.DS_Store
+*.swp
