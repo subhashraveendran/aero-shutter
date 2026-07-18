@@ -21,6 +21,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Raw TCP socket bridge for PTP/IP camera connections.
@@ -127,10 +128,12 @@ class TcpSocketPlugin : Plugin() {
             .build()
 
         val latch = CountDownLatch(1)
-        @Volatile var network: Network? = null
+        // AtomicReference gives a safe cross-thread handoff from the callback
+        // thread to the waiting caller (Kotlin forbids @Volatile on locals).
+        val networkRef = AtomicReference<Network?>(null)
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(available: Network) {
-                network = available
+                networkRef.set(available)
                 latch.countDown()
             }
 
@@ -154,7 +157,7 @@ class TcpSocketPlugin : Plugin() {
             return null
         }
 
-        val net = network
+        val net = networkRef.get()
         return if (net != null) {
             Pair(net, callback)
         } else {
