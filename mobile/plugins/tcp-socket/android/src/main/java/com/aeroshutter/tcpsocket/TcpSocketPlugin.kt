@@ -113,6 +113,9 @@ class TcpSocketPlugin : Plugin() {
                 } else {
                     val socket = Socket()
                     socket.tcpNoDelay = true
+                    // Anti-auto-disconnect: enable TCP keepalive so an idle
+                    // camera link isn't silently dropped by the OS/router.
+                    socket.keepAlive = true
                     socket.connect(InetSocketAddress(host, port), timeoutMs)
                     ConnectOutcome(socket, null, "default")
                 }
@@ -181,6 +184,9 @@ class TcpSocketPlugin : Plugin() {
                     callbackRef.set(acquired.second)
                     val socket = acquired.first.socketFactory.createSocket() as Socket
                     socket.tcpNoDelay = true
+                    // Anti-auto-disconnect: TCP keepalive on the Wi-Fi-bound
+                    // camera socket so the idle PTP/IP link stays up.
+                    socket.keepAlive = true
                     try {
                         socket.connect(InetSocketAddress(host, port), timeoutMs)
                         tryClaim(ConnectOutcome(socket, acquired.second, "wifi-bound"))
@@ -202,6 +208,9 @@ class TcpSocketPlugin : Plugin() {
             try {
                 val socket = Socket()
                 socket.tcpNoDelay = true
+                // Anti-auto-disconnect: TCP keepalive on the default-network
+                // camera socket path too.
+                socket.keepAlive = true
                 socket.connect(InetSocketAddress(host, port), timeoutMs)
                 tryClaim(ConnectOutcome(socket, null, "default"))
             } catch (e: Exception) {
@@ -465,6 +474,16 @@ class TcpSocketPlugin : Plugin() {
             }
         }
 
+        // Anti-auto-disconnect (HOLD THE LINK): we keep this NetworkCallback
+        // registered for the WHOLE session — it is only torn down by
+        // leaveWifi()/releaseJoin(). Android drops a no-internet Wi-Fi network
+        // within ~30s unless its NetworkRequest is actively held, so releasing
+        // it early (or letting per-socket cleanup unregister it) would cause the
+        // camera to "automatically disconnect". Per-socket bind-race callbacks
+        // in connect() are DISTINCT from this one; cleanup() only unregisters
+        // those (Conn.networkCallback), never joinCallback. bindProcessToNetwork
+        // stays in effect until releaseJoin() sets it back to null.
+        // NEEDS ON-DEVICE TESTING.
         joinCallback = callback
         try {
             // Give the user generous time to accept the system Wi-Fi dialog.

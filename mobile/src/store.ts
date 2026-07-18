@@ -80,6 +80,8 @@ interface AppState {
 
   photos: Photo[];
   loadingPhotos: boolean;
+  /** Progress while listing photos, or null when idle/done. */
+  photoLoadProgress: { loaded: number; total: number } | null;
   importedIds: Set<string>;
   filter: FilterChip;
   selection: Set<number>;
@@ -96,6 +98,8 @@ interface AppState {
   toasts: Toast[];
 
   autoImportTimer: number | null;
+  /** Keep-alive interval handle; pings the camera so it doesn't idle-drop. */
+  keepAliveTimer: number | null;
 
   // OTA live-update state (self-hosted; no-ops on web/demo).
   /** Result of the last manifest check. 'up-to-date' until proven otherwise. */
@@ -152,6 +156,10 @@ interface AppState {
   dismissToast: (id: number) => void;
   startAutoImport: () => void;
   stopAutoImport: () => void;
+  /** Start the periodic keep-alive ping (no-op if already running). */
+  startKeepAlive: () => void;
+  /** Stop the keep-alive ping. */
+  stopKeepAlive: () => void;
 
   /** Check the OTA manifest for a newer web bundle (debounced, demo-safe). */
   checkForUpdates: () => Promise<void>;
@@ -213,6 +221,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   photos: [],
   loadingPhotos: false,
+  photoLoadProgress: null,
   importedIds: new Set(),
   filter: 'all',
   selection: new Set(),
@@ -228,6 +237,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   toasts: [],
   autoImportTimer: null,
+  keepAliveTimer: null,
 
   updateStatus: 'up-to-date',
   updateLatest: null,
@@ -448,6 +458,8 @@ export const useStore = create<AppState>((set, get) => ({
     await haptics.success();
     // Ask for notification permission up-front so later import events can fire.
     if (get().settings.notifyOnImport) void requestNotificationPermission();
+    // Keep the PTP session + Wi-Fi link alive against the camera's idle timeout.
+    get().startKeepAlive();
     await get().refreshPhotos();
     if (get().settings.autoImport && get().settings.watchMode) get().startAutoImport();
   },
@@ -460,6 +472,7 @@ export const useStore = create<AppState>((set, get) => ({
   async disconnect() {
     const t = get().autoImportTimer;
     if (t) window.clearInterval(t);
+    get().stopKeepAlive();
     await camera.disconnect();
     // Release any app-requested Wi-Fi binding so the phone can return to its
     // normal network. Best-effort; no-op if we never joined in-app.
@@ -471,6 +484,8 @@ export const useStore = create<AppState>((set, get) => ({
       props: [],
       screen: 'connect',
       autoImportTimer: null,
+      keepAliveTimer: null,
+      photoLoadProgress: null,
       connectStatus: '',
       networkBinding: null,
       wifiSsid: null,
@@ -479,12 +494,24 @@ export const useStore = create<AppState>((set, get) => ({
 
   async refreshPhotos() {
     if (!camera.connected) return;
-    set({ loadingPhotos: true });
+    set({ loadingPhotos: true, photoLoadProgress: { loaded: 0, total: 0 } });
     try {
-      const photos = await camera.listPhotos();
-      set({ photos, loadingPhotos: false });
+      // Progressive: listPhotos yields newest-first batches. We accumulate the
+      // decoded photos and set the growing array so the contact sheet fills as
+      // items arrive instead of blocking on a spinner for 500+ objects.
+      const accumulated: Photo[] = [];
+      const photos = await camera.listPhotos((loaded, total, newPhotos) => {
+        // Ignore stale callbacks if we disconnected mid-listing.
+        if (!camera.connected) return;
+        accumulated.push(...newPhotos);
+        set({
+          photos: [...accumulated],
+          photoLoadProgress: { loaded, total },
+        });
+      });
+      set({ photos, loadingPhotos: false, photoLoadProgress: null });
     } catch (e) {
-      set({ loadingPhotos: false });
+      set({ loadingPhotos: false, photoLoadProgress: null });
       get().toast(e instanceof Error ? e.message : 'Failed to load photos', 'error');
     }
   },
@@ -672,6 +699,36 @@ export const useStore = create<AppState>((set, get) => ({
     const t = get().autoImportTimer;
     if (t) window.clearInterval(t);
     set({ autoImportTimer: null });
+  },
+
+  startKeepAlive() {
+    if (get().keepAliveTimer) return;
+    // Every ~9s, if the link is connected and NOT busy (importing or mid photo
+    // listing), fire one cheap serialized PTP op. It rides the client mutex so
+    // it can never overlap real work. This defeats the D5300's idle-session /
+    // Wi-Fi drop. On a connection error we disconnect cleanly + toast rather
+    // than spinning forever.
+    const timer = window.setInterval(async () => {
+      const s = get();
+      // Short-circuit while busy: a real transaction is already keeping the
+      // link warm, and we don't want to pile onto the queue.
+      if (!s.connected || s.importing || s.loadingPhotos) return;
+      try {
+        await camera.keepAlive();
+      } catch (e) {
+        // A failed keep-alive means the link is gone. Bail cleanly.
+        const message = e instanceof Error ? e.message : 'Camera link lost';
+        get().toast(`Camera disconnected: ${message}`, 'error');
+        await get().disconnect();
+      }
+    }, 9000);
+    set({ keepAliveTimer: timer });
+  },
+
+  stopKeepAlive() {
+    const t = get().keepAliveTimer;
+    if (t) window.clearInterval(t);
+    set({ keepAliveTimer: null });
   },
 
   async checkForUpdates() {

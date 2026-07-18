@@ -81,31 +81,67 @@ export class CameraService {
     return this.client;
   }
 
-  async listPhotos(): Promise<Photo[]> {
+  /**
+   * List all photos on the camera. Incremental + resilient:
+   * - getObjectHandles() once (fast), then getObjectInfo one handle at a time
+   *   (serialized by the client mutex).
+   * - Nikon returns handles oldest-first, so we iterate in REVERSE to surface
+   *   the NEWEST photos first — the gallery fills top-down with recent shots.
+   * - After every small batch we invoke onProgress with the running count and
+   *   the freshly-decoded photos so the UI can render progressively instead of
+   *   freezing on a spinner while 500+ objects load.
+   * - Per-item try/catch: a single bad/hung object is counted and skipped (the
+   *   client's 15s transaction timeout guards a truly dead link).
+   * Returns the full newest-first list at the end.
+   */
+  async listPhotos(
+    onProgress?: (loaded: number, total: number, newPhotos: Photo[]) => void,
+  ): Promise<Photo[]> {
     const client = this.require();
     const handles = await client.getObjectHandles();
+    // Reverse: newest (highest handle, latest capture) first.
+    const ordered = [...handles].reverse();
+    const total = ordered.length;
     const photos: Photo[] = [];
-    for (const handle of handles) {
+    const BATCH = 8;
+    let batch: Photo[] = [];
+    let processed = 0;
+
+    for (const handle of ordered) {
       try {
         const info = await client.getObjectInfo(handle);
         // Skip folders / associations.
-        if (info.associationType !== 0) continue;
-        photos.push({
-          handle,
-          filename: info.filename,
-          size: info.objectCompressedSize,
-          format: formatOf(info.objectFormat, info.filename),
-          width: info.imagePixWidth,
-          height: info.imagePixHeight,
-          captureEpochMs: info.captureEpochMs,
-        });
+        if (info.associationType === 0) {
+          const photo: Photo = {
+            handle,
+            filename: info.filename,
+            size: info.objectCompressedSize,
+            format: formatOf(info.objectFormat, info.filename),
+            width: info.imagePixWidth,
+            height: info.imagePixHeight,
+            captureEpochMs: info.captureEpochMs,
+          };
+          photos.push(photo);
+          batch.push(photo);
+        }
       } catch {
         // Ignore individual object failures; keep listing.
       }
+      processed += 1;
+      if (batch.length >= BATCH || processed === total) {
+        onProgress?.(processed, total, batch);
+        batch = [];
+      }
     }
-    // Newest first.
+    // Newest first (handles are already reverse-ordered, but capture time is the
+    // authoritative sort key and matches what the store expects).
     photos.sort((a, b) => (b.captureEpochMs ?? 0) - (a.captureEpochMs ?? 0));
     return photos;
+  }
+
+  /** Lightweight keep-alive round-trip; throws on a dead link. */
+  async keepAlive(): Promise<void> {
+    await this.require().keepAlive();
   }
 
   async thumbnail(handle: number): Promise<string> {

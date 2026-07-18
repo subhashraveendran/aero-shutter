@@ -666,6 +666,44 @@
   overflow: hidden;
 }
 
+/* Progressive photo-listing progress strip (amber / darkroom). */
+.load-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--amber);
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--card);
+}
+.load-progress-text {
+  white-space: nowrap;
+}
+.load-progress-bar {
+  position: relative;
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-strong);
+  overflow: hidden;
+}
+.load-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--amber);
+  border-radius: 2px;
+  transition: width 200ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .load-progress-fill {
+    transition: none;
+  }
+}
+
 .empty {
   flex: 1;
   display: grid;

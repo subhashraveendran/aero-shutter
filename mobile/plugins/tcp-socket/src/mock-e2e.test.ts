@@ -69,6 +69,34 @@ describe('mock camera end-to-end (PTP/IP handshake -> list -> thumb)', () => {
     await client.close();
   });
 
+  it('serializes overlapping transactions without clobbering the pending slot', async () => {
+    const client = new PtpIpClient('127.0.0.1', 15740);
+    await client.connect();
+    await client.openSession();
+
+    const handles = await client.getObjectHandles();
+    // Fire three concurrent operations against different handles. With a single
+    // pending slot and no mutex these would clobber each other and mismatch
+    // responses. The mutex must serialize them so each resolves correctly.
+    const [a, b, c] = await Promise.all([
+      client.getObjectInfo(handles[0]),
+      client.getObjectInfo(handles[1]),
+      client.getObjectInfo(handles[2]),
+    ]);
+
+    const expectedA = await client.getObjectInfo(handles[0]);
+    const expectedB = await client.getObjectInfo(handles[1]);
+    const expectedC = await client.getObjectInfo(handles[2]);
+
+    expect(a.filename).toBe(expectedA.filename);
+    expect(b.filename).toBe(expectedB.filename);
+    expect(c.filename).toBe(expectedC.filename);
+    // The three concurrent results are for distinct handles (no cross-talk).
+    expect(new Set([a.filename, b.filename, c.filename]).size).toBe(3);
+
+    await client.close();
+  });
+
   it('streams an object in partial chunks and captures a new frame', async () => {
     const client = new PtpIpClient('127.0.0.1', 15740);
     await client.connect();

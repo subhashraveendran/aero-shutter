@@ -75,6 +75,14 @@ export class PtpIpClient {
   private txnCounter = 1;
   private pending: PendingTransaction | null = null;
   private sessionOpen = false;
+  // Serialization lock. PTP/IP on a single command connection is strictly
+  // request -> response: only ONE transaction may be in flight at a time.
+  // The app fires overlapping operations (listing getObjectInfo, thumbnail
+  // getThumb, keep-alive, capture, ...) which would otherwise clobber the
+  // single `pending` slot and desync the connection. We chain every
+  // transaction onto this promise so a new one never starts until the previous
+  // one has fully settled (response, timeout, or error) and `pending` is clear.
+  private txnQueue: Promise<unknown> = Promise.resolve();
   connectionNumber = 0;
   responderName = '';
   /** How the underlying camera socket was bound to the network. */
@@ -264,7 +272,32 @@ export class PtpIpClient {
     }
   }
 
+  /**
+   * Public entry point for a PTP transaction. Serialized: the actual exchange
+   * (runTransaction) is chained onto txnQueue so it only starts once the
+   * previous transaction has settled. A failed/timed-out transaction still
+   * releases the lock (the chain uses a settle-catch) so the queue continues.
+   */
   private transaction(
+    opcode: number,
+    params: number[] = [],
+    dataPhase: number = DataPhase.DataToInitiator,
+    outData?: Uint8Array,
+  ): Promise<TransactionResult> {
+    const run = () => this.runTransaction(opcode, params, dataPhase, outData);
+    // Wait for the prior transaction to fully settle (ignore its outcome), then
+    // run ours. The returned promise reflects ONLY our transaction's result.
+    const result = this.txnQueue.then(run, run);
+    // Keep the chain alive regardless of this transaction's success/failure so
+    // a rejection never breaks the queue for subsequent callers.
+    this.txnQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  private runTransaction(
     opcode: number,
     params: number[] = [],
     dataPhase: number = DataPhase.DataToInitiator,
@@ -341,6 +374,16 @@ export class PtpIpClient {
   async getStorageIds(): Promise<number[]> {
     const r = this.ensureOk(await this.transaction(OpCode.GetStorageIDs), 'GetStorageIDs');
     return readU32Array(r.data);
+  }
+
+  /**
+   * Cheap serialized round-trip used as a keep-alive so the camera doesn't drop
+   * an idle PTP session / Wi-Fi link. GetStorageIDs is tiny and always
+   * supported; it goes through the same mutex as every other transaction so it
+   * never overlaps real work. Throws on a dead link so the caller can react.
+   */
+  async keepAlive(): Promise<void> {
+    this.ensureOk(await this.transaction(OpCode.GetStorageIDs), 'KeepAlive');
   }
 
   async getObjectHandles(storageId = 0xffffffff): Promise<number[]> {

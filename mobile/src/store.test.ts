@@ -56,16 +56,24 @@ vi.mock('./lib/wifi', () => ({
 
 // camera service: record connect() calls and let tests control success.
 const cameraConnect = vi.fn(async (_host: string, _port?: number, _bind?: boolean) => undefined);
+// Tests can flip these to drive listPhotos progress + keepAlive behavior.
+type ProgressCb = (loaded: number, total: number, newPhotos: unknown[]) => void;
+let cameraConnected = false;
+let listPhotosImpl: (onProgress?: ProgressCb) => Promise<unknown[]> = async () => [];
+const keepAliveMock = vi.fn(async () => undefined);
 vi.mock('./lib/camera', () => ({
   camera: {
     get connected() {
-      return false;
+      return cameraConnected;
     },
     cameraModel: 'Nikon D5300',
     networkBinding: 'wifi-bound',
     connect: (h: string, p?: number, b?: boolean) => cameraConnect(h, p, b),
-    disconnect: async () => undefined,
-    listPhotos: async () => [],
+    disconnect: async () => {
+      cameraConnected = false;
+    },
+    listPhotos: (onProgress?: ProgressCb) => listPhotosImpl(onProgress),
+    keepAlive: () => keepAliveMock(),
   },
 }));
 
@@ -124,6 +132,11 @@ const resetStore = () =>
     joiningWifi: false,
     wifiError: null,
     wifiSsid: null,
+    photos: [],
+    loadingPhotos: false,
+    photoLoadProgress: null,
+    keepAliveTimer: null,
+    importing: false,
     settings: { cameraIp: '192.168.1.1', keepInternetOnCellular: true } as never,
   });
 
@@ -131,6 +144,10 @@ beforeEach(() => {
   probeConstructions.length = 0;
   probeShouldConnect = () => false;
   cameraConnect.mockClear();
+  keepAliveMock.mockClear();
+  keepAliveMock.mockResolvedValue(undefined);
+  cameraConnected = false;
+  listPhotosImpl = async () => [];
   joinWifiMock.mockClear();
   findSsidMock.mockClear();
   findSsidMock.mockResolvedValue(null);
@@ -252,6 +269,123 @@ describe('joinCameraWifi → autoConnect', () => {
     useStore.setState({ joiningWifi: true });
     await useStore.getState().joinCameraWifi();
     expect(joinWifiMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('refreshPhotos progressive update', () => {
+  const photo = (handle: number, filename: string, epoch: number) => ({
+    handle,
+    filename,
+    size: 100,
+    format: 'JPEG',
+    width: 10,
+    height: 10,
+    captureEpochMs: epoch,
+  });
+
+  it('sets loading + progress and appends photos as batches arrive', async () => {
+    cameraConnected = true;
+    const p1 = [photo(1, 'A.JPG', 300), photo(2, 'B.JPG', 200)];
+    const p2 = [photo(3, 'C.JPG', 100)];
+    const progressSnapshots: Array<{ loaded: number; count: number } | null> = [];
+
+    listPhotosImpl = async (onProgress) => {
+      onProgress?.(2, 3, p1);
+      progressSnapshots.push({
+        loaded: useStore.getState().photoLoadProgress?.loaded ?? -1,
+        count: useStore.getState().photos.length,
+      });
+      onProgress?.(3, 3, p2);
+      progressSnapshots.push({
+        loaded: useStore.getState().photoLoadProgress?.loaded ?? -1,
+        count: useStore.getState().photos.length,
+      });
+      return [...p1, ...p2];
+    };
+
+    await useStore.getState().refreshPhotos();
+
+    // Photos filled progressively during the run.
+    expect(progressSnapshots[0]).toEqual({ loaded: 2, count: 2 });
+    expect(progressSnapshots[1]).toEqual({ loaded: 3, count: 3 });
+
+    // Cleared when done.
+    const s = useStore.getState();
+    expect(s.loadingPhotos).toBe(false);
+    expect(s.photoLoadProgress).toBeNull();
+    expect(s.photos.length).toBe(3);
+  });
+
+  it('clears progress and toasts on error', async () => {
+    cameraConnected = true;
+    listPhotosImpl = async () => {
+      throw new Error('link dropped');
+    };
+    useStore.setState({ toasts: [] });
+
+    await useStore.getState().refreshPhotos();
+
+    const s = useStore.getState();
+    expect(s.loadingPhotos).toBe(false);
+    expect(s.photoLoadProgress).toBeNull();
+    const toast = s.toasts[s.toasts.length - 1];
+    expect(toast?.kind).toBe('error');
+    expect(toast?.message).toContain('link dropped');
+  });
+});
+
+describe('keep-alive scheduling', () => {
+  it('starts a single timer and is idempotent; stop clears it', () => {
+    const setInterval = vi.spyOn(window, 'setInterval');
+    const clearInterval = vi.spyOn(window, 'clearInterval');
+
+    useStore.getState().startKeepAlive();
+    const firstTimer = useStore.getState().keepAliveTimer;
+    expect(firstTimer).not.toBeNull();
+    // Second call is a no-op (still one timer).
+    useStore.getState().startKeepAlive();
+    expect(useStore.getState().keepAliveTimer).toBe(firstTimer);
+    expect(setInterval).toHaveBeenCalledTimes(1);
+
+    useStore.getState().stopKeepAlive();
+    expect(useStore.getState().keepAliveTimer).toBeNull();
+    expect(clearInterval).toHaveBeenCalledWith(firstTimer);
+
+    setInterval.mockRestore();
+    clearInterval.mockRestore();
+  });
+
+  it('pings the camera when connected and idle, and skips when busy', async () => {
+    vi.useFakeTimers();
+    cameraConnected = true;
+    useStore.setState({ connected: true, importing: false, loadingPhotos: false });
+
+    useStore.getState().startKeepAlive();
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(keepAliveMock).toHaveBeenCalledTimes(1);
+
+    // Busy: no ping.
+    useStore.setState({ importing: true });
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(keepAliveMock).toHaveBeenCalledTimes(1);
+
+    useStore.getState().stopKeepAlive();
+    vi.useRealTimers();
+  });
+
+  it('disconnects cleanly when keep-alive throws a link error', async () => {
+    vi.useFakeTimers();
+    cameraConnected = true;
+    useStore.setState({ connected: true, importing: false, loadingPhotos: false, toasts: [] });
+    keepAliveMock.mockRejectedValueOnce(new Error('ECONNRESET'));
+
+    useStore.getState().startKeepAlive();
+    await vi.advanceTimersByTimeAsync(9000);
+
+    const s = useStore.getState();
+    expect(s.connected).toBe(false);
+    expect(s.keepAliveTimer).toBeNull();
+    vi.useRealTimers();
   });
 });
 

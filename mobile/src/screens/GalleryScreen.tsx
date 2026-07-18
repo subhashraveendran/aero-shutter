@@ -31,6 +31,7 @@ function matches(photo: Photo, filter: FilterChip, imported: boolean): boolean {
 export function GalleryScreen() {
   const photos = useStore((s) => s.photos);
   const loading = useStore((s) => s.loadingPhotos);
+  const loadProgress = useStore((s) => s.photoLoadProgress);
   const importedIds = useStore((s) => s.importedIds);
   const filter = useStore((s) => s.filter);
   const setFilter = useStore((s) => s.setFilter);
@@ -140,6 +141,22 @@ export function GalleryScreen() {
           </div>
         )}
 
+        {loading && loadProgress && loadProgress.total > 0 && (
+          <div className="load-progress" role="status" aria-live="polite">
+            <span className="load-progress-text">
+              Developing {loadProgress.loaded} / {loadProgress.total}
+            </span>
+            <span className="load-progress-bar">
+              <span
+                className="load-progress-fill"
+                style={{
+                  width: `${Math.round((loadProgress.loaded / loadProgress.total) * 100)}%`,
+                }}
+              />
+            </span>
+          </div>
+        )}
+
         {loading && photos.length === 0 ? (
           <div className="contact-sheet">
             <div className="grid">
@@ -148,7 +165,7 @@ export function GalleryScreen() {
               ))}
             </div>
           </div>
-        ) : visible.length === 0 ? (
+        ) : visible.length === 0 && !loading ? (
           <div className="empty">
             <span className="glyph">
               <CameraIcon size={30} className="" />
