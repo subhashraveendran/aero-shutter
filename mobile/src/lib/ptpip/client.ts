@@ -115,22 +115,73 @@ export class PtpIpClient {
     this.connectionNumber = ack.connectionNumber;
     this.responderName = ack.name;
 
-    // Event connection (bound by connection number). Best-effort: some cameras
-    // and the mock tolerate its absence, so failures here are non-fatal.
-    try {
-      const ev = await TcpSocket.connect({
-        host: this.host,
-        port: this.port,
-        timeoutMs,
-        bindWifi: this.bindWifi,
-      });
-      this.eventSocketId = ev.socketId;
-      await TcpSocket.write({
+    // Event connection (bound by the connection number from the command ack).
+    // This is REQUIRED: Nikon bodies (e.g. the D5300) will not answer
+    // OpenSession on the command channel until the event channel handshake has
+    // completed, so we must send InitEventRequest AND wait for InitEventAck
+    // before proceeding — otherwise OpenSession (0x1002) times out.
+    const ev = await TcpSocket.connect({
+      host: this.host,
+      port: this.port,
+      timeoutMs,
+      bindWifi: this.bindWifi,
+    });
+    this.eventSocketId = ev.socketId;
+    const evHandle = await TcpSocket.addListener('data', (e) => {
+      if (e.socketId === this.eventSocketId) this.onEventData(fromBase64(e.dataB64));
+    });
+    this.listeners.push(evHandle);
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.eventInitResolve = null;
+        this.eventInitReject = null;
+        reject(new Error('Event channel handshake timed out'));
+      }, timeoutMs);
+      this.eventInitResolve = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      this.eventInitReject = (err) => {
+        clearTimeout(timer);
+        reject(err);
+      };
+      void TcpSocket.write({
         socketId: ev.socketId,
         dataB64: toBase64(encodeInitEventRequest(ack.connectionNumber)),
+      }).catch((err) => {
+        clearTimeout(timer);
+        this.eventInitResolve = null;
+        this.eventInitReject = null;
+        reject(err instanceof Error ? err : new Error(String(err)));
       });
-    } catch {
-      this.eventSocketId = null;
+    });
+  }
+
+  private eventBuffer: Uint8Array = new Uint8Array(0);
+  private eventInitResolve: (() => void) | null = null;
+  private eventInitReject: ((e: Error) => void) | null = null;
+
+  // onEventData drives the event-channel handshake (resolving once InitEventAck
+  // arrives) and thereafter drains any Event packets so the camera is never
+  // blocked writing to us.
+  private onEventData(data: Uint8Array): void {
+    this.eventBuffer = concat([this.eventBuffer, data]);
+    const { packets, consumed } = decodePackets(this.eventBuffer);
+    this.eventBuffer = this.eventBuffer.subarray(consumed);
+    for (const p of packets) {
+      if (p.type === PacketType.InitEventAck && this.eventInitResolve) {
+        const done = this.eventInitResolve;
+        this.eventInitResolve = null;
+        this.eventInitReject = null;
+        done();
+      } else if (p.type === PacketType.InitFail && this.eventInitReject) {
+        const fail = this.eventInitReject;
+        this.eventInitResolve = null;
+        this.eventInitReject = null;
+        fail(new Error('Camera rejected the event connection (InitFail)'));
+      }
+      // Post-handshake Event packets are intentionally drained/ignored.
     }
   }
 
