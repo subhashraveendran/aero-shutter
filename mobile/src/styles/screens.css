@@ -78,94 +78,136 @@
 
 /* ------------------------------------------------------------
    Radar / safelight auto-detect animation
+   A darkroom instrument: warm-black scope, rotating amber
+   safelight sweep, concentric rings that pulse outward, a
+   breathing amber core with the Wi-Fi glyph, faint film grain.
    All motion is transform/opacity only for 60fps.
+
+   CIRCLE INVARIANT: the scope MUST always be a perfect circle.
+   The connect screen is a scrolling flex column, so a plain
+   `height` gets shrunk by the flex layout (that produced the old
+   ellipse). We lock the size with an explicit responsive var,
+   equal width/height, aspect-ratio, and flex-shrink:0 so it is
+   never squashed.
    ------------------------------------------------------------ */
 .radar {
+  --radar-size: min(232px, 62vw);
   align-self: center;
+  flex: 0 0 auto;      /* never let the flex column squash it */
+  flex-shrink: 0;
   position: relative;
-  width: 200px;
-  height: 200px;
+  width: var(--radar-size);
+  height: var(--radar-size);
+  aspect-ratio: 1 / 1; /* belt-and-suspenders: stays circular */
   margin: var(--s-6) 0 var(--s-4);
   display: grid;
   place-items: center;
   border-radius: 50%;
   isolation: isolate;
+  /* soft warm vignette so the scope reads as a lit instrument */
+  background:
+    radial-gradient(circle at 50% 44%, rgba(255, 138, 61, 0.08), transparent 58%),
+    radial-gradient(circle at 50% 50%, var(--bg-elevated) 0 40%, transparent 72%);
+  box-shadow:
+    inset 0 0 0 1px var(--border),
+    inset 0 8px 40px rgba(0, 0, 0, 0.55),
+    0 12px 40px rgba(0, 0, 0, 0.35);
 }
 /* faint film-grain inside the scope */
 .radar-grain {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  opacity: 0.5;
+  opacity: 0.45;
   mix-blend-mode: overlay;
   pointer-events: none;
   background-image: radial-gradient(rgba(255, 255, 255, 0.5) 0.5px, transparent 0.5px);
   background-size: 3px 3px;
   -webkit-mask: radial-gradient(circle, #000 66%, transparent 72%);
   mask: radial-gradient(circle, #000 66%, transparent 72%);
+  animation: radar-grain-drift 5s steps(6) infinite;
 }
+@keyframes radar-grain-drift {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(-1px, 1px); }
+  50% { transform: translate(1px, -1px); }
+  75% { transform: translate(1px, 1px); }
+  100% { transform: translate(0, 0); }
+}
+/* concentric rings, sized as % of the scope so they scale with it */
 .radar-ring {
   position: absolute;
   border-radius: 50%;
   border: 1px solid var(--border-strong);
   transition: border-color var(--dur-med);
+  will-change: transform, opacity;
 }
-.radar-ring.r1 { inset: 0; }
-.radar-ring.r2 { inset: 34px; opacity: 0.65; }
-.radar-ring.r3 { inset: 68px; opacity: 0.4; }
-/* degree ticks around the outer ring */
+.radar-ring.r1 { inset: 3%; }
+.radar-ring.r2 { inset: 21%; opacity: 0.62; }
+.radar-ring.r3 { inset: 39%; opacity: 0.4; }
+/* while searching, the rings breathe outward continuously */
+.radar.live .radar-ring.r1 { animation: ring-pulse 3s var(--ease-out) infinite; }
+.radar.live .radar-ring.r2 { animation: ring-pulse 3s var(--ease-out) infinite 0.5s; }
+.radar.live .radar-ring.r3 { animation: ring-pulse 3s var(--ease-out) infinite 1s; }
+@keyframes ring-pulse {
+  0% { transform: scale(0.96); opacity: 0.15; }
+  40% { opacity: 0.55; }
+  100% { transform: scale(1.06); opacity: 0; }
+}
+/* degree ticks around the outer ring (mask sized in % to stay circular) */
 .radar-ticks {
   position: absolute;
   inset: 0;
   border-radius: 50%;
   background: repeating-conic-gradient(from 0deg, var(--border-strong) 0 0.6deg, transparent 0.6deg 15deg);
-  -webkit-mask: radial-gradient(circle, transparent 92px, #000 93px, #000 99px, transparent 100px);
-  mask: radial-gradient(circle, transparent 92px, #000 93px, #000 99px, transparent 100px);
-  opacity: 0.5;
+  -webkit-mask: radial-gradient(circle, transparent 45.5%, #000 46%, #000 49%, transparent 49.5%);
+  mask: radial-gradient(circle, transparent 45.5%, #000 46%, #000 49%, transparent 49.5%);
+  opacity: 0.45;
 }
 /* rotating amber sweep — the "developing"/scan beam */
 .radar-sweep {
   position: absolute;
-  inset: 4px;
+  inset: 2%;
   border-radius: 50%;
   background: conic-gradient(
     from 0deg,
     transparent 0deg,
     rgba(255, 138, 61, 0.02) 30deg,
-    var(--amber-glow) 62deg,
+    var(--amber-glow) 60deg,
     var(--amber-bright) 72deg,
-    transparent 76deg
+    transparent 78deg
   );
   -webkit-mask: radial-gradient(circle, #000 68%, transparent 70%);
   mask: radial-gradient(circle, #000 68%, transparent 70%);
-  opacity: 0;
+  opacity: 0.28;
   transition: opacity var(--dur-med);
   will-change: transform;
+  animation: radar-sweep 6s linear infinite;
 }
-.radar.live .radar-sweep { opacity: 1; animation: radar-sweep 2.2s linear infinite; }
-.radar.locked .radar-sweep { animation-duration: 1.1s; }
+.radar.live .radar-sweep { opacity: 1; animation-duration: 1.9s; }
+.radar.locked .radar-sweep { animation-duration: 1s; opacity: 1; }
 @keyframes radar-sweep { to { transform: rotate(360deg); } }
 /* expanding pings emitted from the centre while searching */
 .radar-ping {
   position: absolute;
-  width: 40px;
-  height: 40px;
+  width: 22%;
+  height: 22%;
   border-radius: 50%;
   border: 1.5px solid var(--amber);
   opacity: 0;
   will-change: transform, opacity;
 }
-.radar.live .radar-ping.p1 { animation: radar-ping 2.2s var(--ease-out) infinite; }
-.radar.live .radar-ping.p2 { animation: radar-ping 2.2s var(--ease-out) infinite 1.1s; }
+.radar.live .radar-ping.p1 { animation: radar-ping 1.9s var(--ease-out) infinite; }
+.radar.live .radar-ping.p2 { animation: radar-ping 1.9s var(--ease-out) infinite 0.95s; }
 @keyframes radar-ping {
-  0% { transform: scale(0.35); opacity: 0.7; }
+  0% { transform: scale(0.4); opacity: 0.7; }
   70% { opacity: 0.14; }
-  100% { transform: scale(4.6); opacity: 0; }
+  100% { transform: scale(4.2); opacity: 0; }
 }
-/* central safelight node */
+/* central safelight node — sized in % so it scales with the scope */
 .radar-core {
-  width: 60px;
-  height: 60px;
+  width: 30%;
+  height: 30%;
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -173,10 +215,16 @@
   background: radial-gradient(circle at 50% 38%, var(--amber-bright), var(--amber-deep));
   box-shadow: 0 0 30px var(--amber-glow), inset 0 0 0 1px rgba(255, 255, 255, 0.14);
   z-index: 2;
-  animation: safelight-breathe 3.4s ease-in-out infinite;
-  transition: transform var(--dur-med) var(--ease-spring), box-shadow var(--dur-med);
+  animation: radar-core-breathe 3.4s ease-in-out infinite;
+  transition: transform var(--dur-med) var(--ease-spring), box-shadow var(--dur-med),
+    background var(--dur-med);
+}
+@keyframes radar-core-breathe {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 26px var(--amber-glow), inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
+  50% { transform: scale(1.05); box-shadow: 0 0 40px var(--amber-glow), inset 0 0 0 1px rgba(255, 255, 255, 0.2); }
 }
 .radar-core-icon { opacity: 0.92; }
+.radar.live .radar-core { animation-duration: 2.2s; }
 .radar.locked .radar-core {
   animation: core-throb 0.9s ease-in-out infinite;
   box-shadow: 0 0 48px var(--amber), inset 0 0 0 1px rgba(255, 255, 255, 0.2);
@@ -191,11 +239,12 @@
   color: var(--text-dim);
   box-shadow: 0 0 0 1px var(--border-strong);
 }
-.radar.failed .radar-ring { border-color: var(--border); }
+.radar.failed .radar-sweep { opacity: 0.12; animation-duration: 6s; }
+.radar.failed .radar-ring { border-color: var(--border); animation: none; }
 /* a satisfying "lock" flare when the camera is found */
 .radar-lock {
   position: absolute;
-  inset: 22px;
+  inset: 11%;
   border-radius: 50%;
   border: 2px solid var(--amber-bright);
   z-index: 1;
@@ -358,6 +407,17 @@
   font-size: 12.5px;
   text-align: center;
 }
+/* Small always-available manual-connect affordance so the user is never stuck. */
+.connect-manual-link {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  box-shadow: none;
+}
+.connect-manual-link:active { transform: none; color: var(--amber-bright); }
 
 /* Safelight-toned wifi caveat */
 .wifi-note {

@@ -71,6 +71,21 @@ describe('candidateHosts', () => {
     expect(hosts).toContain('192.168.1.1');
   });
 
+  it('orders candidates preferred, gateway, derived-guess, then static list', async () => {
+    mockWifiInfo = { gateway: '10.11.12.1', ipAddress: '192.168.5.42' };
+    const hosts = await candidateHosts('172.16.0.1');
+    // Exact ordering of the dynamic prefix.
+    expect(hosts.slice(0, 4)).toEqual([
+      '172.16.0.1', // preferred
+      '10.11.12.1', // live gateway
+      '192.168.5.1', // derived .1 from interface IP
+      '192.168.1.1', // first static Nikon candidate
+    ]);
+    // Static list follows, in declared order, with no duplicates.
+    for (const c of NIKON_AP_CANDIDATES) expect(hosts).toContain(c);
+    expect(new Set(hosts).size).toBe(hosts.length);
+  });
+
   it('ignores 0.0.0.0 gateway readings', async () => {
     mockWifiInfo = { gateway: '0.0.0.0', ipAddress: '0.0.0.0' };
     const hosts = await candidateHosts();

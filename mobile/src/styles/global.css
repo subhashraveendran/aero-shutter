@@ -386,8 +386,14 @@ img {
     transition-duration: 0.001ms !important;
   }
   .grain { animation: none; }
-  /* Radar: no motion, but keep a clear "active" static state. */
-  .radar.live .radar-sweep { opacity: 0.9 !important; }
-  .radar.live .radar-ping { opacity: 0 !important; }
+  /* Radar: no motion, but keep a clear, attractive static state —
+     the amber sweep parked at a pleasing angle, core lit, rings shown. */
+  .radar-grain { animation: none !important; }
+  .radar-sweep { opacity: 0.85 !important; transform: rotate(-38deg) !important; }
+  .radar.live .radar-sweep,
+  .radar.locked .radar-sweep { opacity: 1 !important; }
+  .radar-ring { opacity: 0.5 !important; transform: none !important; }
+  .radar .radar-ping { opacity: 0 !important; }
+  .radar-core { transform: none !important; }
   .searching-label .pip { opacity: 1 !important; }
 }

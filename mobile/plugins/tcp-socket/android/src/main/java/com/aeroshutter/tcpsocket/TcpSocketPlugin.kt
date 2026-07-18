@@ -40,6 +40,22 @@ import java.util.concurrent.atomic.AtomicReference
  * default network is left untouched, so app/system internet keeps flowing over
  * cellular/mobile data. The per-connection NetworkCallback is unregistered on
  * close so we don't hold the Wi-Fi request open.
+ *
+ * Race + fallback (why it now connects reliably)
+ * ----------------------------------------------
+ * The Wi-Fi-bound path only works if a bound Wi-Fi network is actually granted.
+ * On some phones the request is slow, denied, or the bound socket can't reach
+ * the camera even though a plain default socket can (e.g. the phone has NO SIM,
+ * so the DEFAULT network already IS the camera Wi-Fi). Previously, if acquiring
+ * or binding failed we gave up without ever trying a plain socket.
+ *
+ * Now, when bindWifi is requested we RACE two attempts and use whichever
+ * connects first:
+ *   1. a Wi-Fi-bound socket (short bounded wait to acquire the Wi-Fi network),
+ *   2. a plain default-network socket.
+ * Whichever wins is kept; the loser is closed and its Wi-Fi request released.
+ * This means it works whether or not cellular is present, and a stall on one
+ * path never blocks the other.
  */
 @CapacitorPlugin(name = "TcpSocket")
 class TcpSocketPlugin : Plugin() {
@@ -69,48 +85,122 @@ class TcpSocketPlugin : Plugin() {
         val socketId = "sock-${idCounter.incrementAndGet()}"
 
         ioPool.execute {
-            var networkCallback: ConnectivityManager.NetworkCallback? = null
             try {
-                var wifiNetwork: Network? = null
-                if (bindWifi) {
-                    // Acquire a Wi-Fi network that does NOT require internet, so
-                    // we can pin the camera socket to Wi-Fi while the device keeps
-                    // cellular internet on the process default network.
-                    val acquired = acquireWifiNetwork(timeoutMs)
-                    wifiNetwork = acquired?.first
-                    networkCallback = acquired?.second
+                val outcome = if (bindWifi) {
+                    raceWifiAndDefault(host, port, timeoutMs)
+                } else {
+                    val socket = Socket()
+                    socket.tcpNoDelay = true
+                    socket.connect(InetSocketAddress(host, port), timeoutMs)
+                    ConnectOutcome(socket, null, "default")
                 }
 
-                val socket = if (wifiNetwork != null) {
-                    // Route this socket over Wi-Fi explicitly.
-                    wifiNetwork.socketFactory.createSocket() as Socket
-                } else {
-                    Socket()
-                }
-                socket.tcpNoDelay = true
-                socket.connect(InetSocketAddress(host, port), timeoutMs)
-                sockets[socketId] = Conn(socket, networkCallback)
+                sockets[socketId] = Conn(outcome.socket, outcome.networkCallback)
 
                 val result = JSObject()
                 result.put("socketId", socketId)
-                result.put(
-                    "networkBinding",
-                    if (wifiNetwork != null) "wifi-bound" else "default",
-                )
+                result.put("networkBinding", outcome.binding)
                 call.resolve(result)
 
-                readLoop(socketId, socket)
+                readLoop(socketId, outcome.socket)
             } catch (e: Exception) {
-                // Release the Wi-Fi request if the connect failed.
-                if (networkCallback != null) {
-                    try {
-                        connectivityManager().unregisterNetworkCallback(networkCallback)
-                    } catch (_: Exception) {
-                    }
-                }
                 call.reject(e.message ?: "connect failed")
             }
         }
+    }
+
+    private data class ConnectOutcome(
+        val socket: Socket,
+        val networkCallback: ConnectivityManager.NetworkCallback?,
+        val binding: String,
+    )
+
+    /**
+     * Race a Wi-Fi-bound socket against a plain default-network socket and return
+     * whichever connects first; close/release the loser. This is the core of the
+     * "it actually connects" fix: it works whether or not cellular is present,
+     * and a stall or denial on the Wi-Fi-bind path never blocks the default path.
+     *
+     * If BOTH attempts fail, the last error is rethrown so the caller can reject.
+     */
+    private fun raceWifiAndDefault(host: String, port: Int, timeoutMs: Int): ConnectOutcome {
+        val cm = connectivityManager()
+        // Winner handoff: first successful ConnectOutcome wins. `claimed` ensures
+        // only one outcome is kept; any later winner is closed instead.
+        val winnerRef = AtomicReference<ConnectOutcome?>(null)
+        val errorRef = AtomicReference<Exception?>(null)
+        val claimed = java.util.concurrent.atomic.AtomicBoolean(false)
+        val done = CountDownLatch(2)
+
+        // Bound the Wi-Fi acquire to a short window so it can never hang the whole
+        // connect: at most ~3.5s (and never more than the overall timeout).
+        val wifiAcquireMs = minOf(timeoutMs, 3500)
+
+        // Track the callback so we can unregister it if the Wi-Fi socket loses.
+        val callbackRef = AtomicReference<ConnectivityManager.NetworkCallback?>(null)
+
+        fun tryClaim(outcome: ConnectOutcome) {
+            if (claimed.compareAndSet(false, true)) {
+                winnerRef.set(outcome)
+            } else {
+                // Someone else already won: discard this socket + release Wi-Fi.
+                try { outcome.socket.close() } catch (_: Exception) {}
+                outcome.networkCallback?.let {
+                    try { cm.unregisterNetworkCallback(it) } catch (_: Exception) {}
+                }
+            }
+        }
+
+        // Path 1: Wi-Fi-bound socket.
+        ioPool.execute {
+            try {
+                val acquired = acquireWifiNetwork(wifiAcquireMs)
+                if (acquired != null) {
+                    callbackRef.set(acquired.second)
+                    val socket = acquired.first.socketFactory.createSocket() as Socket
+                    socket.tcpNoDelay = true
+                    try {
+                        socket.connect(InetSocketAddress(host, port), timeoutMs)
+                        tryClaim(ConnectOutcome(socket, acquired.second, "wifi-bound"))
+                    } catch (e: Exception) {
+                        try { socket.close() } catch (_: Exception) {}
+                        try { cm.unregisterNetworkCallback(acquired.second) } catch (_: Exception) {}
+                        errorRef.set(e)
+                    }
+                }
+            } catch (e: Exception) {
+                errorRef.set(e)
+            } finally {
+                done.countDown()
+            }
+        }
+
+        // Path 2: plain default-network socket (covers no-SIM / bind-denied cases).
+        ioPool.execute {
+            try {
+                val socket = Socket()
+                socket.tcpNoDelay = true
+                socket.connect(InetSocketAddress(host, port), timeoutMs)
+                tryClaim(ConnectOutcome(socket, null, "default"))
+            } catch (e: Exception) {
+                errorRef.set(e)
+            } finally {
+                done.countDown()
+            }
+        }
+
+        // Wait until a winner appears or both paths finish. Poll the winner so we
+        // return as soon as the first success lands rather than waiting for both.
+        val deadline = System.currentTimeMillis() + timeoutMs + 500L
+        while (System.currentTimeMillis() < deadline) {
+            if (winnerRef.get() != null) break
+            if (done.await(50, TimeUnit.MILLISECONDS)) break
+        }
+
+        val winner = winnerRef.get()
+        if (winner != null) return winner
+
+        throw errorRef.get() ?: java.net.SocketTimeoutException("connect timed out")
     }
 
     /**

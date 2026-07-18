@@ -13,7 +13,9 @@
     "typecheck": "tsc --noEmit",
     "cap:sync": "cap sync",
     "cap:ios": "cap add ios",
-    "cap:android": "cap add android"
+    "cap:android": "cap add android",
+    "assets:source": "node resources/generate-source.mjs",
+    "assets": "npm run assets:source && capacitor-assets generate --iconBackgroundColor '#0a0a0b' --iconBackgroundColorDark '#0a0a0b' --splashBackgroundColor '#0a0a0b' --splashBackgroundColorDark '#0a0a0b'"
   },
   "dependencies": {
     "@aero-shutter/tcp-socket": "file:./plugins/tcp-socket",
@@ -34,6 +36,7 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^6.1.2",
     "@fontsource/archivo": "^5.2.8",
     "@fontsource/fraunces": "^5.2.9",

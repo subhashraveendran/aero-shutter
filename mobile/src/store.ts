@@ -176,10 +176,19 @@ export const useStore = create<AppState>((set, get) => ({
     set({ connecting: true, connectError: null, connectStatus: `Connecting to ${ip}…` });
     try {
       await camera.connect(ip, undefined, bindWifi);
+      if (ip !== get().settings.cameraIp && !get().demo) {
+        void get().updateSettings({ cameraIp: ip });
+      }
       await get()._onConnected(ip);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Could not reach the camera';
-      set({ connecting: false, connectError: message, connectStatus: '' });
+      set({
+        connecting: false,
+        connectError:
+          `Could not reach ${ip}: ${message}. Check the address and that your phone is on ` +
+          `the camera's Wi-Fi.`,
+        connectStatus: '',
+      });
       await haptics.warn();
     }
   },
@@ -188,57 +197,77 @@ export const useStore = create<AppState>((set, get) => ({
     // Safe to call repeatedly: bail if we're already connecting or connected.
     if (get().connecting || get().connected) return;
     set({ connecting: true, connectError: null, connectStatus: 'Searching for camera…' });
-    const bindWifi = get().settings.keepInternetOnCellular;
+    const preferBind = get().settings.keepInternetOnCellular;
 
     let hosts: string[];
     try {
       hosts = await candidateHosts(get().settings.cameraIp);
     } catch {
-      hosts = [get().settings.cameraIp];
+      hosts = [get().settings.cameraIp || '192.168.1.1'];
+    }
+    // Guarantee the standard Nikon AP address is always in play, even if
+    // discovery returned an empty or odd list.
+    if (!hosts.includes('192.168.1.1')) hosts = [...hosts, '192.168.1.1'];
+
+    const PROBE_TIMEOUT = get().demo ? 8000 : 2500;
+
+    // One probe sweep: race all candidate hosts with the given bind mode; the
+    // first to finish the PTP/IP handshake wins. Returns null if none answer.
+    const probeSweep = (bindWifi: boolean): Promise<string | null> =>
+      new Promise<string | null>((resolve) => {
+        let settled = false;
+        let remaining = hosts.length;
+        if (remaining === 0) {
+          resolve(null);
+          return;
+        }
+        for (const host of hosts) {
+          void (async () => {
+            try {
+              await probeHost(host, PROBE_TIMEOUT, bindWifi);
+              if (!settled) {
+                settled = true;
+                set({ connectStatus: `Found camera at ${host}` });
+                resolve(host);
+              }
+            } catch {
+              remaining -= 1;
+              if (remaining === 0 && !settled) {
+                settled = true;
+                resolve(null);
+              }
+            }
+          })();
+        }
+      });
+
+    // First sweep with the user's preferred bind mode. If bindWifi probing
+    // fails for every candidate, RETRY the whole sweep once WITHOUT Wi-Fi
+    // binding before declaring failure — this covers the no-cellular case
+    // (default network already IS the camera Wi-Fi) and binding quirks.
+    let winner = await probeSweep(preferBind);
+    let bindWifi = preferBind;
+    if (!winner && preferBind) {
+      set({ connectStatus: 'Retrying without Wi-Fi binding…' });
+      winner = await probeSweep(false);
+      if (winner) bindWifi = false;
     }
 
-    // Probe candidates concurrently with short timeouts; the first to complete
-    // the PTP/IP handshake wins. Others are cancelled once we have a winner.
-    const PROBE_TIMEOUT = get().demo ? 8000 : 2500;
-    let settled = false;
-
-    const winner = await new Promise<string | null>((resolve) => {
-      let remaining = hosts.length;
-      if (remaining === 0) {
-        resolve(null);
-        return;
-      }
-      for (const host of hosts) {
-        void (async () => {
-          try {
-            await probeHost(host, PROBE_TIMEOUT, bindWifi);
-            if (!settled) {
-              settled = true;
-              set({ connectStatus: `Found camera at ${host}` });
-              resolve(host);
-            }
-          } catch {
-            remaining -= 1;
-            if (remaining === 0 && !settled) {
-              settled = true;
-              resolve(null);
-            }
-          }
-        })();
-      }
-    });
-
     if (!winner) {
+      const tried = hosts.join(', ');
       set({
         connecting: false,
         connectStatus: '',
-        connectError: 'No camera found. Check you are on the camera Wi-Fi, or enter the IP manually.',
+        connectError:
+          `No camera found (tried ${tried}). Make sure your phone is joined to the ` +
+          `camera's Wi-Fi (e.g. “Nikon_WU2_…”), or enter the IP manually below.`,
       });
       await haptics.warn();
       return;
     }
 
-    // Establish the real, session-open connection on the winning host.
+    // Establish the real, session-open connection on the winning host, using
+    // whichever bind mode actually reached the camera during probing.
     try {
       await camera.connect(winner, undefined, bindWifi);
       // Remember the working address for next time.
@@ -248,7 +277,11 @@ export const useStore = create<AppState>((set, get) => ({
       await get()._onConnected(winner);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Could not reach the camera';
-      set({ connecting: false, connectError: message, connectStatus: '' });
+      set({
+        connecting: false,
+        connectError: `Could not open a session with ${winner}: ${message}`,
+        connectStatus: '',
+      });
       await haptics.warn();
     }
   },

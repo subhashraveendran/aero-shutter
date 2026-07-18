@@ -82,8 +82,6 @@ export function ConnectScreen() {
     label = 'Standing by';
   }
 
-  const retry = () => void connect(advanced && valid ? ip.trim() : undefined);
-
   return (
     <div className="connect scroll">
       <div className="wordmark">
@@ -123,9 +121,22 @@ export function ConnectScreen() {
       {!busy && (
         <div className="connect-actions">
           {connectError && (
-            <button className="btn btn-primary btn-block" onClick={retry}>
-              Retry auto-detect
-            </button>
+            <>
+              <button className="btn btn-primary btn-block" onClick={() => void connect()}>
+                Retry auto-detect
+              </button>
+              <button
+                className="btn btn-ghost btn-block"
+                onClick={() => {
+                  setAdvanced(true);
+                  requestAnimationFrame(() =>
+                    document.getElementById('camera-ip-input')?.focus(),
+                  );
+                }}
+              >
+                Enter IP manually
+              </button>
+            </>
           )}
           {demo && (
             <button className="btn btn-ghost btn-block" onClick={() => void enterDemo()}>
@@ -133,6 +144,21 @@ export function ConnectScreen() {
             </button>
           )}
           {connectError && <p className="error-line">{connectError}</p>}
+          {!connectError && (
+            <button
+              className="btn btn-ghost btn-block connect-manual-link"
+              onClick={() => {
+                setAdvanced((a) => !a);
+                if (!advanced) {
+                  requestAnimationFrame(() =>
+                    document.getElementById('camera-ip-input')?.focus(),
+                  );
+                }
+              }}
+            >
+              Connect manually
+            </button>
+          )}
         </div>
       )}
 
@@ -175,6 +201,7 @@ export function ConnectScreen() {
           <div className={`ip-wrap ${focus ? 'focus' : ''} ${ip && !valid ? 'invalid' : ''}`}>
             <span className="lead">IP</span>
             <input
+              id="camera-ip-input"
               inputMode="decimal"
               value={ip}
               onChange={(e) => setIp(e.target.value)}

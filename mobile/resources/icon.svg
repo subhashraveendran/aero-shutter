@@ -1,0 +1,31 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="75%">
+      <stop offset="0%" stop-color="#14110d"/>
+      <stop offset="55%" stop-color="#0d0b0a"/>
+      <stop offset="100%" stop-color="#0a0a0b"/>
+    </radialGradient>
+    <linearGradient id="blade" x1="10%" y1="0%" x2="90%" y2="100%">
+      <stop offset="0%" stop-color="#ffd178"/>
+      <stop offset="40%" stop-color="#ffab2e"/>
+      <stop offset="100%" stop-color="#a8490a"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffdd92" stop-opacity="0.5"/>
+      <stop offset="45%" stop-color="#ff9d24" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#ff9d24" stop-opacity="0"/>
+    </radialGradient></defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  
+    <g transform="translate(512 512)">
+      <circle cx="0" cy="0" r="401.20" fill="url(#glow)"/>
+      <path d="M 0.00 -340.00 A 340 340 0 0 1 294.45 -170.00 L 88.33 -51.00 Q 62.54 36.92 0.00 -340.00 Z" fill="url(#blade)" stroke="#0a0a0b" stroke-width="7.48" stroke-linejoin="round"/>
+      <path d="M 294.45 -170.00 A 340 340 0 0 1 294.45 170.00 L 88.33 51.00 Q -0.70 72.62 294.45 -170.00 Z" fill="url(#blade)" stroke="#0a0a0b" stroke-width="7.48" stroke-linejoin="round"/>
+      <path d="M 294.45 170.00 A 340 340 0 0 1 0.00 340.00 L 0.00 102.00 Q -63.24 35.70 294.45 170.00 Z" fill="url(#blade)" stroke="#0a0a0b" stroke-width="7.48" stroke-linejoin="round"/>
+      <path d="M 0.00 340.00 A 340 340 0 0 1 -294.45 170.00 L -88.33 51.00 Q -62.54 -36.92 0.00 340.00 Z" fill="url(#blade)" stroke="#0a0a0b" stroke-width="7.48" stroke-linejoin="round"/>
+      <path d="M -294.45 170.00 A 340 340 0 0 1 -294.45 -170.00 L -88.33 -51.00 Q 0.70 -72.62 -294.45 170.00 Z" fill="url(#blade)" stroke="#0a0a0b" stroke-width="7.48" stroke-linejoin="round"/>
+      <path d="M -294.45 -170.00 A 340 340 0 0 1 -0.00 -340.00 L -0.00 -102.00 Q 63.24 -35.70 -294.45 -170.00 Z" fill="url(#blade)" stroke="#0a0a0b" stroke-width="7.48" stroke-linejoin="round"/>
+      <circle cx="0" cy="0" r="99.96" fill="#0a0a0b"/>
+      <circle cx="0" cy="0" r="99.96" fill="none" stroke="#ffe0a0" stroke-width="6.80" opacity="0.85"/>
+    </g>
+</svg>
