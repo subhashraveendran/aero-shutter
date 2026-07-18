@@ -6,4 +6,11 @@
          device keeps cellular internet while joined to the camera's AP. -->
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Required to change Wi-Fi state (join a network from inside the app via
+         WifiNetworkSpecifier on API 29+). -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <!-- Required on Android 10+ to read the current SSID and Wi-Fi scan results
+         used to auto-find the Nikon AP. Requested at runtime; degrades to an
+         empty scan / null SSID if the user denies it. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 </manifest>

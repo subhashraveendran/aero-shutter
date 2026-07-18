@@ -51,6 +51,8 @@
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>AeroShutter connects to your camera over your local Wi-Fi network to browse and import photos.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>AeroShutter uses your location only to read the name of the Wi-Fi network so it can confirm you are joined to the camera.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_ptp._tcp</string>

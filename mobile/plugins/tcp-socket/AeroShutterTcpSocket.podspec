@@ -12,6 +12,8 @@ Pod::Spec.new do |s|
   s.source = { git: 'https://github.com/subhashraveendran/aero-shutter.git', tag: s.version.to_s }
   s.source_files = 'ios/Plugin/**/*.{swift,h,m,c,cc,mm,cpp}'
   s.ios.deployment_target = '13.0'
+  # NEHotspotConfiguration / NEHotspotNetwork for in-app Wi-Fi joining.
+  s.frameworks = 'NetworkExtension', 'SystemConfiguration'
   s.dependency 'Capacitor'
   s.swift_version = '5.1'
 end

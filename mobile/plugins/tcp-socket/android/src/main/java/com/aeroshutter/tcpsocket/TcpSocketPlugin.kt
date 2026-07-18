@@ -1,19 +1,25 @@
 package com.aeroshutter.tcpsocket
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.DhcpInfo
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.wifi.WifiManager
+import android.net.wifi.WifiNetworkSpecifier
 import android.os.Build
+import android.os.PatternMatcher
 import android.util.Base64
 import com.getcapacitor.JSObject
+import com.getcapacitor.JSArray
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
+import com.getcapacitor.annotation.Permission
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
@@ -57,7 +63,15 @@ import java.util.concurrent.atomic.AtomicReference
  * This means it works whether or not cellular is present, and a stall on one
  * path never blocks the other.
  */
-@CapacitorPlugin(name = "TcpSocket")
+@CapacitorPlugin(
+    name = "TcpSocket",
+    permissions = [
+        Permission(
+            alias = "location",
+            strings = [Manifest.permission.ACCESS_FINE_LOCATION],
+        ),
+    ],
+)
 class TcpSocketPlugin : Plugin() {
 
     private data class Conn(
@@ -68,6 +82,14 @@ class TcpSocketPlugin : Plugin() {
     private val sockets = ConcurrentHashMap<String, Conn>()
     private val idCounter = AtomicInteger(0)
     private val ioPool = Executors.newCachedThreadPool()
+
+    /**
+     * Long-lived callback for an app-requested Wi-Fi network joined via
+     * joinWifi(). Kept so leaveWifi() can unregister it and unbind the process.
+     * Distinct from the per-socket bind-race callbacks in connect().
+     */
+    private var joinCallback: ConnectivityManager.NetworkCallback? = null
+    private var joinedSsid: String? = null
 
     private fun connectivityManager(): ConnectivityManager =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -343,6 +365,215 @@ class TcpSocketPlugin : Plugin() {
         result.put("platform", "android")
         call.resolve(result)
     }
+
+    // ===================================================================
+    //  In-app Wi-Fi joining
+    // ===================================================================
+
+    /**
+     * Join a Wi-Fi network from inside the app.
+     *
+     * API 29+ (primary path): build a NetworkRequest with TRANSPORT_WIFI and a
+     * WifiNetworkSpecifier for the SSID (exact via setSsid, or PREFIX match via
+     * setSsidPattern for the "Nikon_WU2_" case). If a password is supplied we
+     * set a WPA2 passphrase; otherwise the network is treated as open (typical
+     * for a Nikon camera AP). ConnectivityManager.requestNetwork shows the
+     * system's "connect to this Wi-Fi?" dialog; on onAvailable() we
+     * bindProcessToNetwork(network) so all subsequent camera sockets route to
+     * the AP. The callback is retained so leaveWifi() can tear it down.
+     *
+     * API < 29: no WifiNetworkSpecifier — return joined=false so the UI tells
+     * the user to join manually via system settings.
+     */
+    @PluginMethod
+    fun joinWifi(call: PluginCall) {
+        val ssid = call.getString("ssid")
+        val password = call.getString("password")
+        val ssidPrefix = call.getString("ssidPrefix")
+
+        if (ssid.isNullOrEmpty() && ssidPrefix.isNullOrEmpty()) {
+            call.reject("ssid or ssidPrefix is required")
+            return
+        }
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            // Pre-Android 10: WifiNetworkSpecifier is unavailable. We could use
+            // the deprecated WifiManager.addNetwork/enableNetwork path, but it
+            // is unreliable and largely no-ops on modern OEM builds, so we
+            // honestly report failure and let the UI fall back to Settings.
+            val result = JSObject()
+            result.put("joined", false)
+            result.put("ssid", ssid ?: (ssidPrefix ?: ""))
+            result.put("bound", false)
+            call.resolve(result)
+            return
+        }
+
+        // If only a prefix is given, try to resolve it to a concrete SSID from a
+        // scan (needs location perms). If we can't, we still request via a
+        // prefix PatternMatcher so the OS can offer matching APs.
+        val resolvedSsid: String? = ssid ?: ssidPrefix?.let { firstScanMatch(it) }
+
+        val specifierBuilder = WifiNetworkSpecifier.Builder()
+        if (resolvedSsid != null) {
+            specifierBuilder.setSsid(resolvedSsid)
+        } else if (ssidPrefix != null) {
+            specifierBuilder.setSsidPattern(
+                PatternMatcher(ssidPrefix, PatternMatcher.PATTERN_PREFIX),
+            )
+        }
+        if (!password.isNullOrEmpty()) {
+            specifierBuilder.setWpa2Passphrase(password)
+        }
+
+        val cm = connectivityManager()
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            // The camera AP has no internet; do NOT require NET_CAPABILITY_INTERNET.
+            .setNetworkSpecifier(specifierBuilder.build())
+            .build()
+
+        // Release any previous join before requesting a new one.
+        releaseJoin(cm)
+
+        val settled = java.util.concurrent.atomic.AtomicBoolean(false)
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                val bound = try {
+                    cm.bindProcessToNetwork(network)
+                } catch (_: Exception) {
+                    false
+                }
+                joinedSsid = resolvedSsid ?: ssidPrefix
+                if (settled.compareAndSet(false, true)) {
+                    val result = JSObject()
+                    result.put("joined", true)
+                    result.put("ssid", joinedSsid ?: "")
+                    result.put("bound", bound)
+                    call.resolve(result)
+                }
+            }
+
+            override fun onUnavailable() {
+                if (settled.compareAndSet(false, true)) {
+                    val result = JSObject()
+                    result.put("joined", false)
+                    result.put("ssid", resolvedSsid ?: (ssidPrefix ?: ""))
+                    result.put("bound", false)
+                    call.resolve(result)
+                }
+            }
+        }
+
+        joinCallback = callback
+        try {
+            // Give the user generous time to accept the system Wi-Fi dialog.
+            cm.requestNetwork(request, callback, 30_000)
+        } catch (e: Exception) {
+            joinCallback = null
+            call.reject(e.message ?: "joinWifi failed")
+        }
+    }
+
+    /** Best-effort readout of the currently-joined SSID. */
+    @PluginMethod
+    fun currentWifi(call: PluginCall) {
+        val result = JSObject()
+        result.put("ssid", currentSsid())
+        call.resolve(result)
+    }
+
+    /** Best-effort scan of visible SSIDs (empty if location denied/off). */
+    @PluginMethod
+    fun scanWifi(call: PluginCall) {
+        val networks = JSArray()
+        if (hasLocationPermission()) {
+            try {
+                val wifi = context.applicationContext
+                    .getSystemService(Context.WIFI_SERVICE) as WifiManager
+                @Suppress("DEPRECATION")
+                val results = wifi.scanResults ?: emptyList()
+                val seen = HashSet<String>()
+                for (r in results) {
+                    val ss = r.SSID ?: continue
+                    if (ss.isEmpty() || !seen.add(ss)) continue
+                    val obj = JSObject()
+                    obj.put("ssid", ss)
+                    networks.put(obj)
+                }
+            } catch (_: Exception) {
+                // Degrade to empty list.
+            }
+        }
+        val result = JSObject()
+        result.put("networks", networks)
+        call.resolve(result)
+    }
+
+    /** Release any app-requested Wi-Fi binding from joinWifi(). */
+    @PluginMethod
+    fun leaveWifi(call: PluginCall) {
+        releaseJoin(connectivityManager())
+        call.resolve()
+    }
+
+    private fun releaseJoin(cm: ConnectivityManager) {
+        val cb = joinCallback
+        joinCallback = null
+        joinedSsid = null
+        try {
+            cm.bindProcessToNetwork(null)
+        } catch (_: Exception) {
+        }
+        if (cb != null) {
+            try {
+                cm.unregisterNetworkCallback(cb)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /** Resolve the first scan SSID starting with [prefix], or null. */
+    private fun firstScanMatch(prefix: String): String? {
+        if (!hasLocationPermission()) return null
+        return try {
+            val wifi = context.applicationContext
+                .getSystemService(Context.WIFI_SERVICE) as WifiManager
+            @Suppress("DEPRECATION")
+            wifi.scanResults
+                ?.mapNotNull { it.SSID }
+                ?.firstOrNull { it.startsWith(prefix) }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Read the currently-connected SSID. On Android 10+ this requires
+     * ACCESS_FINE_LOCATION and location services on; otherwise it is redacted
+     * ("<unknown ssid>") and we return null.
+     */
+    private fun currentSsid(): String? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !hasLocationPermission()) {
+            return null
+        }
+        return try {
+            val wifi = context.applicationContext
+                .getSystemService(Context.WIFI_SERVICE) as WifiManager
+            @Suppress("DEPRECATION")
+            val raw = wifi.connectionInfo?.ssid ?: return null
+            // WifiInfo wraps the SSID in quotes; strip them. Redacted values
+            // ("<unknown ssid>") and empty strings collapse to null.
+            val clean = raw.trim('"')
+            if (clean.isEmpty() || clean == "<unknown ssid>" || clean == "0x") null else clean
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun hasLocationPermission(): Boolean =
+        context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
 
     /** DhcpInfo stores addresses as little-endian ints. */
     private fun intToIp(addr: Int): String? {

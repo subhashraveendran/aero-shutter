@@ -12,16 +12,25 @@ const IP_RE = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
  */
 type Phase = 'idle' | 'searching' | 'found' | 'handshaking';
 
+const NIKON_SSID_PREFIX = 'Nikon_WU2_';
+
 export function ConnectScreen() {
   const connect = useStore((s) => s.connect);
   const enterDemo = useStore((s) => s.enterDemo);
+  const joinCameraWifi = useStore((s) => s.joinCameraWifi);
   const connecting = useStore((s) => s.connecting);
   const connectError = useStore((s) => s.connectError);
+  const joiningWifi = useStore((s) => s.joiningWifi);
+  const wifiError = useStore((s) => s.wifiError);
+  const wifiSsid = useStore((s) => s.wifiSsid);
   const demo = useStore((s) => s.demo);
   const savedIp = useStore((s) => s.settings.cameraIp);
 
   const [phase, setPhase] = useState<Phase>('idle');
   const [advanced, setAdvanced] = useState(false);
+  const [wifiOpen, setWifiOpen] = useState(false);
+  const [ssid, setSsid] = useState(NIKON_SSID_PREFIX);
+  const [password, setPassword] = useState('');
   const [ip, setIp] = useState(savedIp);
   const [focus, setFocus] = useState(false);
   const timers = useRef<number[]>([]);
@@ -68,16 +77,27 @@ export function ConnectScreen() {
     if (connectError) setAdvanced(true);
   }, [connectError]);
 
-  const busy = connecting;
+  const busy = connecting || joiningWifi;
   const detectedIp = ip.trim() && valid ? ip.trim() : savedIp || '192.168.1.1';
 
+  // Enable the join button only for a plausible SSID (prefix alone is fine —
+  // the app will scan for a match — but an empty field is not).
+  const ssidTrimmed = ssid.trim();
+  const canJoin = ssidTrimmed.length > 0;
+
+  const doJoin = () => void joinCameraWifi(ssidTrimmed || NIKON_SSID_PREFIX, password);
+
   let label: string;
-  if (busy) {
+  if (joiningWifi) {
+    label = 'Joining camera Wi-Fi…';
+  } else if (connecting) {
     if (phase === 'found') label = `Found camera at ${detectedIp}`;
     else if (phase === 'handshaking') label = 'Opening session…';
     else label = 'Searching for your Nikon…';
-  } else if (connectError) {
-    label = 'No camera found';
+  } else if (connectError || wifiError) {
+    label = wifiError && !connectError ? 'Could not join Wi-Fi' : 'No camera found';
+  } else if (wifiSsid) {
+    label = `Joined ${wifiSsid}`;
   } else {
     label = 'Standing by';
   }
@@ -113,13 +133,82 @@ export function ConnectScreen() {
         {(phase === 'found' || phase === 'handshaking') && <div className="radar-lock" />}
       </div>
 
-      <p className={`searching-label ${connectError ? 'is-error' : ''}`} aria-live="polite">
+      <p className={`searching-label ${connectError || wifiError ? 'is-error' : ''}`} aria-live="polite">
         <span className="pip" aria-hidden="true" />
         {label}
       </p>
 
+      {wifiSsid && !busy && (
+        <p className="wifi-joined" aria-live="polite">
+          <WifiIcon size={13} /> Connected to {wifiSsid}
+        </p>
+      )}
+
       {!busy && (
         <div className="connect-actions">
+          {/* Primary in-app path: join the camera's Wi-Fi without leaving the
+              app. In demo mode this simulates a join and proceeds to the mock
+              gallery so the whole flow is demoable in the browser. */}
+          {
+            <>
+              <button
+                className="btn btn-primary btn-block join-wifi-btn"
+                // Tries the Nikon prefix directly (scan + join). If a password
+                // or exact SSID is needed, the fields are one tap away below.
+                onClick={doJoin}
+              >
+                <WifiIcon size={18} />
+                Join camera Wi-Fi
+              </button>
+              <button
+                className="btn btn-ghost btn-block connect-manual-link"
+                onClick={() => setWifiOpen((o) => !o)}
+                aria-expanded={wifiOpen}
+              >
+                {wifiOpen ? 'Hide Wi-Fi details' : 'Enter Wi-Fi name / password'}
+              </button>
+              {wifiOpen && (
+                <div className="wifi-field">
+                  <div className="ip-label">Network name (SSID)</div>
+                  <div className="ip-wrap">
+                    <span className="lead">WiFi</span>
+                    <input
+                      value={ssid}
+                      onChange={(e) => setSsid(e.target.value)}
+                      placeholder="Nikon_WU2_XXXXXX"
+                      aria-label="Camera Wi-Fi SSID"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                    />
+                  </div>
+                  <div className="ip-label" style={{ marginTop: 'var(--s-3)' }}>
+                    Password (leave blank if open)
+                  </div>
+                  <div className="ip-wrap">
+                    <span className="lead">Key</span>
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="optional"
+                      aria-label="Camera Wi-Fi password"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                    />
+                  </div>
+                  <button
+                    className="btn btn-primary btn-block"
+                    style={{ marginTop: 'var(--s-3)' }}
+                    disabled={!canJoin}
+                    onClick={doJoin}
+                  >
+                    Join & connect
+                  </button>
+                </div>
+              )}
+              {wifiError && <p className="error-line">{wifiError}</p>}
+            </>
+          }
           {connectError && (
             <>
               <button className="btn btn-primary btn-block" onClick={() => void connect()}>
@@ -173,15 +262,18 @@ export function ConnectScreen() {
         <div className="card step crop-marks">
           <div className="num">02</div>
           <div className="step-body">
-            <strong>Join the camera network</strong>
-            <span>In phone Wi-Fi settings, connect to “Nikon_WU2_…”.</span>
+            <strong>Tap “Join camera Wi-Fi”</strong>
+            <span>
+              The app joins “Nikon_WU2_…” for you. If it can’t, connect to it in your phone’s
+              Wi-Fi settings instead.
+            </span>
           </div>
         </div>
         <div className="card step crop-marks">
           <div className="num">03</div>
           <div className="step-body">
-            <strong>AeroShutter finds it automatically</strong>
-            <span>Auto-detect scans the camera network. Enter an address only if it can’t.</span>
+            <strong>AeroShutter connects automatically</strong>
+            <span>It finds the camera on the network. Enter an address only if it can’t.</span>
           </div>
         </div>
       </div>

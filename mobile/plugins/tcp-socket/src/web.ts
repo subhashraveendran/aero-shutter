@@ -9,7 +9,11 @@ import type {
   CloseOptions,
   ConnectOptions,
   ConnectResult,
+  CurrentWifiResult,
+  JoinWifiOptions,
+  JoinWifiResult,
   NetworkCapabilities,
+  ScanWifiResult,
   TcpSocketPlugin,
   WifiInfo,
   WriteOptions,
@@ -38,6 +42,8 @@ export class TcpSocketWeb extends WebPlugin implements TcpSocketPlugin {
 
   private sockets = new Map<string, MockCameraSocket>();
   private counter = 0;
+  /** SSID the demo pretends to be joined to after joinWifi(). */
+  private demoWifiSsid: string | null = null;
 
   async connect(_options: ConnectOptions): Promise<ConnectResult> {
     const socketId = `demo-${++this.counter}`;
@@ -62,6 +68,31 @@ export class TcpSocketWeb extends WebPlugin implements TcpSocketPlugin {
 
   async getNetworkCapabilities(): Promise<NetworkCapabilities> {
     return { isSplitRoutingSupported: false, platform: 'web' };
+  }
+
+  // ----- Wi-Fi joining (simulated in the browser demo) --------------------
+  // The browser can't touch the OS Wi-Fi stack, so these fake a successful
+  // join to "Nikon_WU2_DEMO" and keep the whole flow demoable end-to-end.
+
+  async joinWifi(options: JoinWifiOptions): Promise<JoinWifiResult> {
+    const ssid =
+      options.ssid ||
+      (options.ssidPrefix ? `${options.ssidPrefix}DEMO` : 'Nikon_WU2_DEMO');
+    this.demoWifiSsid = ssid;
+    return { joined: true, ssid, bound: false };
+  }
+
+  async currentWifi(): Promise<CurrentWifiResult> {
+    return { ssid: this.demoWifiSsid };
+  }
+
+  async scanWifi(): Promise<ScanWifiResult> {
+    // Advertise a fake Nikon AP so prefix auto-find is exercisable in demo.
+    return { networks: [{ ssid: 'Nikon_WU2_DEMO' }] };
+  }
+
+  async leaveWifi(): Promise<void> {
+    this.demoWifiSsid = null;
   }
 
   async write(options: WriteOptions): Promise<void> {

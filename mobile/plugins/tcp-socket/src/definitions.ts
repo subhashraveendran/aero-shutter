@@ -76,6 +76,40 @@ export interface ErrorEvent {
   message: string;
 }
 
+export interface JoinWifiOptions {
+  /** Exact SSID to join. If omitted, `ssidPrefix` is used to find one. */
+  ssid?: string;
+  /** WPA2 passphrase. Omit / empty for an open network (typical Nikon AP). */
+  password?: string;
+  /**
+   * Join the first visible network whose SSID starts with this prefix
+   * (e.g. "Nikon_WU2_"). Used when the exact SSID isn't known ahead of time.
+   */
+  ssidPrefix?: string;
+}
+
+export interface JoinWifiResult {
+  /** True if the OS reported the app-requested network is available/joined. */
+  joined: boolean;
+  /** The SSID that was joined (or targeted), best-effort. */
+  ssid: string;
+  /**
+   * Android: true when the process was bound to the requested Wi-Fi network so
+   * subsequent camera sockets route to the AP. Always false on iOS/web.
+   */
+  bound: boolean;
+}
+
+export interface CurrentWifiResult {
+  /** The SSID the phone is currently joined to, or null if unknown/denied. */
+  ssid: string | null;
+}
+
+export interface ScanWifiResult {
+  /** Best-effort list of visible networks; may be empty if the OS denies it. */
+  networks: { ssid: string }[];
+}
+
 export interface TcpSocketPlugin {
   connect(options: ConnectOptions): Promise<ConnectResult>;
   write(options: WriteOptions): Promise<void>;
@@ -86,6 +120,24 @@ export interface TcpSocketPlugin {
 
   /** Report whether this platform can split camera Wi-Fi from internet. */
   getNetworkCapabilities(): Promise<NetworkCapabilities>;
+
+  /**
+   * Join a Wi-Fi network from inside the app (no trip to system settings).
+   * Provide `ssid` for an exact join, or `ssidPrefix` to join the first
+   * visible match (e.g. the Nikon AP). On Android 29+ this uses a
+   * WifiNetworkSpecifier request and binds the process to the network so the
+   * PTP/IP sockets route to the camera AP.
+   */
+  joinWifi(options: JoinWifiOptions): Promise<JoinWifiResult>;
+
+  /** Best-effort readout of the currently-joined SSID (may be null). */
+  currentWifi(): Promise<CurrentWifiResult>;
+
+  /** Best-effort scan of visible SSIDs (may be empty if the OS denies it). */
+  scanWifi(): Promise<ScanWifiResult>;
+
+  /** Release any app-requested Wi-Fi binding / configuration. */
+  leaveWifi(): Promise<void>;
 
   addListener(
     eventName: 'data',

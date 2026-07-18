@@ -419,6 +419,57 @@
 }
 .connect-manual-link:active { transform: none; color: var(--amber-bright); }
 
+/* Primary "Join camera Wi-Fi" action + inline SSID/password fields */
+.join-wifi-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+}
+.wifi-field {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--s-1);
+}
+.wifi-field .ip-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 0 var(--s-4);
+  min-height: 52px;
+  border-radius: var(--r-md);
+  background: var(--bg-deep);
+  border: 1px solid var(--border-strong);
+}
+.wifi-field .ip-wrap .lead {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.wifi-field input {
+  flex: 1;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  letter-spacing: 0.02em;
+}
+.wifi-field input:focus { outline: none; }
+
+/* "Connected to Nikon_WU2_…" confirmation line */
+.wifi-joined {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  color: var(--amber-bright);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  margin-top: calc(-1 * var(--s-2));
+}
+
 /* Safelight-toned wifi caveat */
 .wifi-note {
   display: flex;

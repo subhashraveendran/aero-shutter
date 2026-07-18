@@ -1,6 +1,8 @@
 import Foundation
 import Capacitor
 import Network
+import NetworkExtension
+import SystemConfiguration.CaptiveNetwork
 
 /**
  * Raw TCP socket bridge for PTP/IP camera connections on iOS.
@@ -158,6 +160,120 @@ public class TcpSocketPlugin: CAPPlugin {
             "isSplitRoutingSupported": false,
             "platform": "ios"
         ])
+    }
+
+    // MARK: - In-app Wi-Fi joining
+
+    /// Last SSID this app applied via NEHotspotConfiguration, so leaveWifi()
+    /// can remove exactly that configuration.
+    private var joinedSsid: String?
+
+    /**
+     * Join a Wi-Fi network using NEHotspotConfigurationManager.
+     *
+     * Requires the "Hotspot Configuration" capability
+     * (com.apple.developer.networking.HotspotConfiguration entitlement), which
+     * must be enabled in the Apple Developer account for a real build.
+     *
+     * iOS cannot enumerate visible SSIDs for third-party apps, so `ssidPrefix`
+     * alone can't be resolved to a concrete SSID — in that case we report
+     * joined=false and the UI asks the user for the exact SSID. `bound` is
+     * always false: iOS owns network routing and there is no process bind.
+     */
+    @objc func joinWifi(_ call: CAPPluginCall) {
+        let ssid = call.getString("ssid")
+        let password = call.getString("password")
+        let ssidPrefix = call.getString("ssidPrefix")
+
+        guard let targetSsid = ssid, !targetSsid.isEmpty else {
+            // No exact SSID: iOS can't scan by prefix, so tell the caller to ask.
+            call.resolve([
+                "joined": false,
+                "ssid": ssidPrefix ?? "",
+                "bound": false
+            ])
+            return
+        }
+
+        let config: NEHotspotConfiguration
+        if let password = password, !password.isEmpty {
+            config = NEHotspotConfiguration(ssid: targetSsid, passphrase: password, isWEP: false)
+        } else {
+            // Open network (typical Nikon camera AP).
+            config = NEHotspotConfiguration(ssid: targetSsid)
+        }
+        config.joinOnce = false
+
+        NEHotspotConfigurationManager.shared.apply(config) { [weak self] error in
+            if let error = error {
+                let nsError = error as NSError
+                // "already associated" means we're effectively joined.
+                if nsError.domain == NEHotspotConfigurationErrorDomain,
+                   nsError.code == NEHotspotConfigurationError.alreadyAssociated.rawValue {
+                    self?.joinedSsid = targetSsid
+                    call.resolve(["joined": true, "ssid": targetSsid, "bound": false])
+                    return
+                }
+                call.resolve([
+                    "joined": false,
+                    "ssid": targetSsid,
+                    "bound": false
+                ])
+                return
+            }
+            self?.joinedSsid = targetSsid
+            // apply() succeeding means the config was accepted; verify best-effort.
+            self?.fetchCurrentSsid { current in
+                let joined = current == nil || current == targetSsid
+                call.resolve([
+                    "joined": joined,
+                    "ssid": targetSsid,
+                    "bound": false
+                ])
+            }
+        }
+    }
+
+    @objc func currentWifi(_ call: CAPPluginCall) {
+        fetchCurrentSsid { ssid in
+            call.resolve(["ssid": ssid ?? NSNull()])
+        }
+    }
+
+    @objc func scanWifi(_ call: CAPPluginCall) {
+        // iOS provides no public API for third-party apps to scan SSIDs.
+        call.resolve(["networks": []])
+    }
+
+    @objc func leaveWifi(_ call: CAPPluginCall) {
+        if let ssid = joinedSsid {
+            NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: ssid)
+            joinedSsid = nil
+        }
+        call.resolve()
+    }
+
+    /// Best-effort current SSID via NEHotspotNetwork.fetchCurrent (iOS 14+),
+    /// falling back to CNCopyCurrentNetworkInfo on older systems. Both require
+    /// the Hotspot / location entitlements to return a real value.
+    private func fetchCurrentSsid(_ completion: @escaping (String?) -> Void) {
+        if #available(iOS 14.0, *) {
+            NEHotspotNetwork.fetchCurrent { network in
+                completion(network?.ssid)
+            }
+        } else {
+            var ssid: String?
+            if let interfaces = CNCopySupportedInterfaces() as? [String] {
+                for iface in interfaces {
+                    if let info = CNCopyCurrentNetworkInfo(iface as CFString) as NSDictionary?,
+                       let name = info[kCNNetworkInfoKeySSID as String] as? String {
+                        ssid = name
+                        break
+                    }
+                }
+            }
+            completion(ssid)
+        }
     }
 
     private func cleanup(_ socketId: String) {

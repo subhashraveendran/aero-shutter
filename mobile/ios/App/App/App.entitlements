@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Hotspot Configuration capability: required for NEHotspotConfigurationManager
+	  so AeroShutter can join the Nikon camera's Wi-Fi AP from inside the app.
+	  This entitlement MUST also be enabled for the App ID in the Apple Developer
+	  account (Certificates, Identifiers & Profiles) for a real device build to
+	  be signed successfully.
+	-->
+	<key>com.apple.developer.networking.HotspotConfiguration</key>
+	<true/>
+</dict>
+</plist>

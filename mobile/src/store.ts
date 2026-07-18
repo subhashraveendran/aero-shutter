@@ -14,6 +14,13 @@ import {
   type Settings,
 } from './lib/settings';
 import { candidateHosts } from './lib/discovery';
+import {
+  currentWifi as readCurrentWifi,
+  findSsidByPrefix,
+  joinWifi as joinWifiNative,
+  leaveWifi as leaveWifiNative,
+  NIKON_SSID_PREFIX,
+} from './lib/wifi';
 import { PtpIpClient } from './lib/ptpip/client';
 import {
   notifyImportComplete,
@@ -52,6 +59,13 @@ interface AppState {
   /** How the camera socket was bound: 'wifi-bound' | 'wifi-pinned' | 'default' | 'unsupported'. */
   networkBinding: string | null;
 
+  /** SSID the app is currently joined to (best-effort), for display. */
+  wifiSsid: string | null;
+  /** True while an in-app Wi-Fi join is in flight. */
+  joiningWifi: boolean;
+  /** Last in-app Wi-Fi join error, if any. */
+  wifiError: string | null;
+
   settings: Settings;
 
   photos: Photo[];
@@ -78,6 +92,13 @@ interface AppState {
   navigate: (screen: Screen) => void;
   connect: (ip?: string) => Promise<void>;
   autoConnect: () => Promise<void>;
+  /**
+   * Join the camera's Wi-Fi from inside the app, then kick off autoConnect().
+   * Pass an exact SSID, or omit to use the Nikon prefix ("Nikon_WU2_").
+   */
+  joinCameraWifi: (ssidOrPrefix?: string, password?: string) => Promise<void>;
+  /** Refresh the displayed current-Wi-Fi SSID (best-effort). */
+  refreshWifiSsid: () => Promise<void>;
   /** Internal: finalize state after a successful handshake + session open. */
   _onConnected: (host: string) => Promise<void>;
   enterDemo: () => Promise<void>;
@@ -132,6 +153,10 @@ export const useStore = create<AppState>((set, get) => ({
   cameraModel: '',
   connectStatus: '',
   networkBinding: null,
+
+  wifiSsid: null,
+  joiningWifi: false,
+  wifiError: null,
 
   settings: { ...DEFAULT_SETTINGS },
 
@@ -286,6 +311,65 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  async joinCameraWifi(ssidOrPrefix, password) {
+    // Re-entrancy guard: ignore if a join or connect is already running.
+    if (get().joiningWifi || get().connecting || get().connected) return;
+
+    // Decide whether the caller gave a full SSID or a prefix to auto-find.
+    const input = (ssidOrPrefix ?? '').trim();
+    const prefix = input && input.endsWith('_') ? input : input ? undefined : NIKON_SSID_PREFIX;
+    const exactSsid = input && !input.endsWith('_') ? input : undefined;
+
+    set({ joiningWifi: true, wifiError: null, connectStatus: 'Joining camera Wi-Fi…' });
+    try {
+      // If we only have a prefix, try a scan first to resolve a concrete SSID
+      // (nicer display, and lets the native exact-join path run). Falls through
+      // to a prefix join if scanning is denied / empty.
+      let ssid = exactSsid;
+      const usePrefix = prefix ?? (exactSsid ? undefined : NIKON_SSID_PREFIX);
+      if (!ssid && usePrefix) {
+        const found = await findSsidByPrefix(usePrefix);
+        if (found) ssid = found;
+      }
+
+      const result = await joinWifiNative({
+        ssid,
+        password: password || undefined,
+        ssidPrefix: ssid ? undefined : usePrefix,
+      });
+
+      if (!result.joined) {
+        set({
+          joiningWifi: false,
+          connectStatus: '',
+          wifiError:
+            'Could not join the camera Wi-Fi automatically. Open your phone’s Wi-Fi ' +
+            'settings and connect to “' + (result.ssid || NIKON_SSID_PREFIX) + '…”, then retry.',
+        });
+        await haptics.warn();
+        return;
+      }
+
+      set({ wifiSsid: result.ssid || ssid || null, joiningWifi: false });
+      await haptics.success();
+      // The camera AP is now the app's network — auto-connect straight away.
+      await get().autoConnect();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Wi-Fi join failed';
+      set({ joiningWifi: false, connectStatus: '', wifiError: message });
+      await haptics.warn();
+    }
+  },
+
+  async refreshWifiSsid() {
+    try {
+      const ssid = await readCurrentWifi();
+      if (ssid !== get().wifiSsid) set({ wifiSsid: ssid });
+    } catch {
+      /* best effort */
+    }
+  },
+
   async _onConnected(host: string) {
     set({
       connected: true,
@@ -311,6 +395,9 @@ export const useStore = create<AppState>((set, get) => ({
     const t = get().autoImportTimer;
     if (t) window.clearInterval(t);
     await camera.disconnect();
+    // Release any app-requested Wi-Fi binding so the phone can return to its
+    // normal network. Best-effort; no-op if we never joined in-app.
+    await leaveWifiNative();
     set({
       connected: false,
       photos: [],
@@ -320,6 +407,7 @@ export const useStore = create<AppState>((set, get) => ({
       autoImportTimer: null,
       connectStatus: '',
       networkBinding: null,
+      wifiSsid: null,
     });
   },
 

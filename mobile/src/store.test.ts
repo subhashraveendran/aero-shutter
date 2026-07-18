@@ -41,6 +41,19 @@ vi.mock('./lib/discovery', () => ({
   candidateHosts: vi.fn(async () => mockHosts),
 }));
 
+// wifi wrapper: let tests control join success + observe calls.
+let mockJoinResult = { joined: true, ssid: 'Nikon_WU2_TEST', bound: true };
+const joinWifiMock = vi.fn(async (_o: unknown) => mockJoinResult);
+const findSsidMock = vi.fn(async (_p: string) => null as string | null);
+const leaveWifiMock = vi.fn(async () => undefined);
+vi.mock('./lib/wifi', () => ({
+  NIKON_SSID_PREFIX: 'Nikon_WU2_',
+  joinWifi: (o: unknown) => joinWifiMock(o),
+  findSsidByPrefix: (p: string) => findSsidMock(p),
+  currentWifi: async () => null,
+  leaveWifi: () => leaveWifiMock(),
+}));
+
 // camera service: record connect() calls and let tests control success.
 const cameraConnect = vi.fn(async (_host: string, _port?: number, _bind?: boolean) => undefined);
 vi.mock('./lib/camera', () => ({
@@ -89,6 +102,9 @@ const resetStore = () =>
     connecting: false,
     connectError: null,
     connectStatus: '',
+    joiningWifi: false,
+    wifiError: null,
+    wifiSsid: null,
     settings: { cameraIp: '192.168.1.1', keepInternetOnCellular: true } as never,
   });
 
@@ -96,6 +112,10 @@ beforeEach(() => {
   probeConstructions.length = 0;
   probeShouldConnect = () => false;
   cameraConnect.mockClear();
+  joinWifiMock.mockClear();
+  findSsidMock.mockClear();
+  findSsidMock.mockResolvedValue(null);
+  mockJoinResult = { joined: true, ssid: 'Nikon_WU2_TEST', bound: true };
   mockHosts = ['192.168.1.1', '192.168.0.1'];
   resetStore();
 });
@@ -158,5 +178,60 @@ describe('autoConnect retry-without-bind', () => {
     const probedHosts = probeConstructions.map((c) => c.host);
     expect(probedHosts).toContain('192.168.1.1');
     expect(useStore.getState().connected).toBe(true);
+  });
+});
+
+describe('joinCameraWifi → autoConnect', () => {
+  it('joins the camera Wi-Fi then auto-connects on success', async () => {
+    // Default prefix path: no exact SSID, scan finds nothing, prefix join wins.
+    probeShouldConnect = () => true; // any probe reaches the camera
+
+    await useStore.getState().joinCameraWifi();
+
+    // Joined via the Nikon prefix, updated the displayed SSID.
+    expect(joinWifiMock).toHaveBeenCalledTimes(1);
+    const arg = joinWifiMock.mock.calls[0][0] as { ssidPrefix?: string };
+    expect(arg.ssidPrefix).toBe('Nikon_WU2_');
+    expect(useStore.getState().wifiSsid).toBe('Nikon_WU2_TEST');
+
+    // Auto-connect ran and succeeded.
+    expect(cameraConnect).toHaveBeenCalledTimes(1);
+    expect(useStore.getState().connected).toBe(true);
+    expect(useStore.getState().joiningWifi).toBe(false);
+    expect(useStore.getState().wifiError).toBeNull();
+  });
+
+  it('passes an exact SSID + password straight through and does not scan', async () => {
+    probeShouldConnect = () => true;
+
+    await useStore.getState().joinCameraWifi('Nikon_WU2_ABCDEF', 'hunter2');
+
+    const arg = joinWifiMock.mock.calls[0][0] as {
+      ssid?: string;
+      password?: string;
+      ssidPrefix?: string;
+    };
+    expect(arg.ssid).toBe('Nikon_WU2_ABCDEF');
+    expect(arg.password).toBe('hunter2');
+    expect(arg.ssidPrefix).toBeUndefined();
+    expect(findSsidMock).not.toHaveBeenCalled();
+    expect(useStore.getState().connected).toBe(true);
+  });
+
+  it('surfaces an error and does not connect when the join fails', async () => {
+    mockJoinResult = { joined: false, ssid: 'Nikon_WU2_', bound: false };
+
+    await useStore.getState().joinCameraWifi();
+
+    expect(cameraConnect).not.toHaveBeenCalled();
+    expect(useStore.getState().connected).toBe(false);
+    expect(useStore.getState().joiningWifi).toBe(false);
+    expect((useStore.getState().wifiError ?? '').toLowerCase()).toContain('wi-fi');
+  });
+
+  it('is re-entrant safe: ignores a second call while already joining', async () => {
+    useStore.setState({ joiningWifi: true });
+    await useStore.getState().joinCameraWifi();
+    expect(joinWifiMock).not.toHaveBeenCalled();
   });
 });
