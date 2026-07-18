@@ -87,3 +87,70 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: mobile/aero-shutter-mobile-${{ github.ref_name }}-debug.apk
+
+  ota-bundle:
+    name: OTA web bundle
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Builds the OTA web bundle with a RELATIVE base ('./') so assets resolve
+      # inside the native webview regardless of the served path. Output is in
+      # mobile/dist-ota with index.html at its root.
+      - name: Build OTA web bundle
+        run: npm run build:ota
+
+      # Zip the OTA output so index.html sits at the ZIP ROOT (note the trailing
+      # "/." — we archive the *contents* of dist-ota, not the directory itself).
+      - name: Zip web bundle
+        run: |
+          cd dist-ota
+          zip -r ../web-bundle.zip . -x '*.DS_Store'
+
+      # Generate ota.json for our self-hosted manifest. Version = tag without a
+      # leading "v". minNativeVersion is read from mobile/ota-min-native.txt if
+      # present, else defaults to this tag's version. URL uses the stable
+      # latest-download path so it never needs editing between releases.
+      - name: Generate ota.json
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          if [ -f ota-min-native.txt ]; then
+            MIN_NATIVE="$(head -n1 ota-min-native.txt | tr -d '[:space:]')"
+          else
+            MIN_NATIVE="$VERSION"
+          fi
+          NOTES="${{ github.event.head_commit.message }}"
+          if [ -z "$NOTES" ]; then NOTES="AeroShutter $TAG"; fi
+          cat > ota.json <<EOF
+          {
+            "version": "$VERSION",
+            "url": "https://github.com/subhashraveendran/aero-shutter/releases/latest/download/web-bundle.zip",
+            "notes": "$NOTES",
+            "minNativeVersion": "$MIN_NATIVE"
+          }
+          EOF
+          cat ota.json
+
+      # Upsert onto the SAME release as the APK + binaries (action-gh-release
+      # matches by tag). Asset names are exactly web-bundle.zip and ota.json so
+      # the .../releases/latest/download/<name> URLs stay stable.
+      - name: Attach OTA bundle + manifest to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            mobile/web-bundle.zip
+            mobile/ota.json

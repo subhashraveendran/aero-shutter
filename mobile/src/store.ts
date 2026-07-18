@@ -28,6 +28,14 @@ import {
   requestNotificationPermission,
 } from './lib/notifications';
 import * as haptics from './lib/haptics';
+import {
+  applyUpdate,
+  checkForUpdate,
+  markAppReady,
+  reloadToApply,
+  type OtaManifest,
+  type UpdateStatus,
+} from './lib/updater';
 
 export type Screen = 'connect' | 'gallery' | 'detail' | 'import' | 'control' | 'settings';
 export type FilterChip = 'all' | 'new' | 'raw' | 'jpeg' | 'imported';
@@ -87,6 +95,20 @@ interface AppState {
 
   autoImportTimer: number | null;
 
+  // OTA live-update state (self-hosted; no-ops on web/demo).
+  /** Result of the last manifest check. 'up-to-date' until proven otherwise. */
+  updateStatus: UpdateStatus;
+  /** The manifest for an available OTA update, if any. */
+  updateLatest: OtaManifest | null;
+  /** True while downloading/applying the bundle. */
+  updateApplying: boolean;
+  /** Download progress 0-100 while applying. */
+  updateProgress: number;
+  /** True once a bundle is downloaded + set, pending a restart. */
+  updatePending: boolean;
+  /** User dismissed the current update banner. */
+  updateDismissed: boolean;
+
   // actions
   init: () => Promise<void>;
   navigate: (screen: Screen) => void;
@@ -120,10 +142,24 @@ interface AppState {
   dismissToast: (id: number) => void;
   startAutoImport: () => void;
   stopAutoImport: () => void;
+
+  /** Check the OTA manifest for a newer web bundle (debounced, demo-safe). */
+  checkForUpdates: () => Promise<void>;
+  /** Download + set the pending OTA bundle, updating progress state. */
+  runUpdate: () => Promise<void>;
+  /** Reload the webview to apply the pending bundle. */
+  applyPendingUpdate: () => Promise<void>;
+  /** Dismiss the update banner for this session. */
+  dismissUpdate: () => void;
 }
 
 let toastSeq = 1;
 let importCancelled = false;
+
+// OTA manifest check debounce: ignore repeated checks within this window
+// (launch + every resume can both fire checkForUpdates()).
+const UPDATE_CHECK_COOLDOWN_MS = 60_000;
+let lastUpdateCheck = 0;
 
 function filteredNewCount(photos: Photo[], imported: Set<string>): number {
   return photos.filter((p) => !imported.has(identityKey(p.filename, p.size))).length;
@@ -178,12 +214,23 @@ export const useStore = create<AppState>((set, get) => ({
   toasts: [],
   autoImportTimer: null,
 
+  updateStatus: 'up-to-date',
+  updateLatest: null,
+  updateApplying: false,
+  updateProgress: 0,
+  updatePending: false,
+  updateDismissed: false,
+
   async init() {
     const settings = await loadSettings();
     const importedIds = await allImportedIds();
     const importedTodayCount = await countImportedToday();
     document.documentElement.dataset.theme = settings.theme;
     set({ settings, importedIds, importedTodayCount });
+    // OTA: tell the native layer we booted OK (rollback safety net), then
+    // check our self-hosted manifest for a newer web bundle. Both no-op on web.
+    void markAppReady();
+    void get().checkForUpdates();
   },
 
   navigate(screen) {
@@ -606,6 +653,53 @@ export const useStore = create<AppState>((set, get) => ({
     const t = get().autoImportTimer;
     if (t) window.clearInterval(t);
     set({ autoImportTimer: null });
+  },
+
+  async checkForUpdates() {
+    // Debounce: skip if we checked within the cooldown, or a download is live.
+    const now = Date.now();
+    if (get().updateApplying) return;
+    if (now - lastUpdateCheck < UPDATE_CHECK_COOLDOWN_MS) return;
+    lastUpdateCheck = now;
+    try {
+      const result = await checkForUpdate();
+      // Preserve a user's dismissal unless a genuinely newer bundle appears.
+      const prev = get();
+      const changed = result.latest?.version !== prev.updateLatest?.version;
+      set({
+        updateStatus: result.status,
+        updateLatest: result.latest,
+        updateDismissed: changed ? false : prev.updateDismissed,
+      });
+    } catch {
+      /* demo-safe: never surface a checker error */
+    }
+  },
+
+  async runUpdate() {
+    const latest = get().updateLatest;
+    if (!latest || get().updateApplying) return;
+    set({ updateApplying: true, updateProgress: 0 });
+    const result = await applyUpdate(latest, (percent) => {
+      set({ updateProgress: Math.max(0, Math.min(100, Math.round(percent))) });
+    });
+    if (result.pending) {
+      set({ updateApplying: false, updatePending: true, updateProgress: 100 });
+      await haptics.success();
+      get().toast('Update ready — restart to apply', 'success');
+    } else {
+      set({ updateApplying: false, updateProgress: 0 });
+      await haptics.warn();
+      get().toast(result.error || 'Update failed', 'error');
+    }
+  },
+
+  async applyPendingUpdate() {
+    await reloadToApply();
+  },
+
+  dismissUpdate() {
+    set({ updateDismissed: true });
   },
 }));
 

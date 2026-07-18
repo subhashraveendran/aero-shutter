@@ -397,3 +397,76 @@ img {
   .radar-core { transform: none !important; }
   .searching-label .pip { opacity: 1 !important; }
 }
+
+/* ============================================================
+   OTA live-update banner — floats above the tab bar, dismissible
+   ============================================================ */
+.ota-banner {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(var(--safe-bottom) + 88px);
+  z-index: 60;
+  padding: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  border-color: var(--amber-line);
+  box-shadow: var(--shadow-amber);
+  animation: toast-in var(--dur-med) var(--ease-spring);
+}
+.ota-close {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: transparent;
+}
+.ota-close:active { color: var(--text); }
+.ota-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text);
+  padding-right: 28px;
+}
+.ota-notes {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+.ota-progress {
+  position: relative;
+  height: 40px;
+  border-radius: var(--r-md);
+  background: var(--amber-soft);
+  border: 1px solid var(--amber-line);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ota-progress-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, var(--amber-bright), var(--amber));
+  transition: width var(--dur-fast) linear;
+}
+.ota-progress-label {
+  position: relative;
+  z-index: 1;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--amber-ink);
+}

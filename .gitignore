@@ -25,3 +25,4 @@ mobile/android/build/
 mobile/android/app/build/
 mobile/android/local.properties
 mobile/.env
+mobile/dist-ota/

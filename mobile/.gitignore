@@ -1,5 +1,8 @@
 node_modules
 dist
+dist-ota
+web-bundle.zip
+ota.json
 ios/App/Pods
 ios/App/App/public
 android/app/src/main/assets/public

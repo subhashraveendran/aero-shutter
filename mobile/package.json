@@ -1,12 +1,13 @@
 {
   "name": "aero-shutter-mobile",
-  "version": "1.0.0",
+  "version": "0.7.0",
   "description": "Phone companion for aero-shutter: connect to Wi-Fi Nikon cameras over PTP/IP, browse, import and control.",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:ota": "tsc --noEmit && OTA_BUILD=1 vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -20,6 +21,7 @@
   "dependencies": {
     "@aero-shutter/tcp-socket": "file:./plugins/tcp-socket",
     "@capacitor/android": "^6.2.1",
+    "@capacitor/app": "^6.0.3",
     "@capacitor/core": "^6.1.2",
     "@capacitor/filesystem": "^6.0.1",
     "@capacitor/haptics": "^6.0.1",
@@ -30,6 +32,7 @@
     "@capacitor/share": "^6.0.2",
     "@capacitor/splash-screen": "^6.0.2",
     "@capacitor/status-bar": "^6.0.1",
+    "@capgo/capacitor-updater": "^6.50.2",
     "dexie": "^4.0.8",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
