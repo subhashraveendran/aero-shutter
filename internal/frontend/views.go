@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -417,6 +418,17 @@ func (m Model) viewPreview(w, h int) string {
 // produces real text lines, and a placeholder covers missing thumbnails and
 // decode failures.
 func (m Model) renderThumb(handle uint32, cols, rows int) string {
+	// State machine (in priority order):
+	//   1. loaded bytes for this handle  -> render image (fall through if
+	//      undecodable to "Preview unavailable")
+	//   2. fetch in flight for handle    -> "Loading preview…"
+	//   3. fetch errored for handle      -> "Preview unavailable"
+	//   4. loaded but empty for handle   -> "Video — no preview" (videos) or
+	//                                       "No preview available"
+	//   5. default                       -> "No Preview" placeholder
+	box := func(label string) string { return thumbnail.LabeledBox(label, cols, rows) + "\n" }
+
+	// 1. We have loaded bytes for this handle: try to render the image.
 	if m.proto != thumbnail.ProtocolNone && m.thumbHandle == handle && len(m.thumbData) > 0 {
 		if img := thumbnail.RenderInline(m.proto, m.thumbData, cols, rows); img != "" {
 			if m.proto.Inline() {
@@ -426,8 +438,53 @@ func (m Model) renderThumb(handle uint32, cols, rows int) string {
 			lines := strings.Count(img, "\n") + 1
 			return img + strings.Repeat("\n", max(1, rows-lines+1))
 		}
+		// Loaded but undecodable.
+		return box("Preview unavailable")
 	}
+
+	// 2. A fetch is in flight for this handle.
+	if m.thumbLoading && m.thumbLoadingHandle == handle {
+		return box("Loading preview…")
+	}
+
+	// 3. This handle errored.
+	if m.thumbErr && m.thumbErrHandle == handle {
+		return box("Preview unavailable")
+	}
+
+	// 4. Loaded but empty (camera returned no embedded thumbnail).
+	if m.thumbHandle == handle && len(m.thumbData) == 0 {
+		if m.isVideoHandle(handle) {
+			return box("Video — no preview")
+		}
+		return box("No preview available")
+	}
+
+	// 5. Default placeholder.
 	return thumbnail.Placeholder(cols, rows) + "\n"
+}
+
+// isVideoHandle reports whether the file with the given handle is a video,
+// either by its camera format code (MOV) or by filename extension.
+func (m Model) isVideoHandle(handle uint32) bool {
+	for _, f := range m.files {
+		if f.Handle == handle {
+			return isVideoFile(f)
+		}
+	}
+	return false
+}
+
+// isVideoFile reports whether f is a video by format code or extension.
+func isVideoFile(f camera.File) bool {
+	if f.Format == ptpip.FormatMOV {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(f.Name)) {
+	case ".mov", ".avi", ".mp4":
+		return true
+	}
+	return false
 }
 
 func formatTime(f camera.File) string {

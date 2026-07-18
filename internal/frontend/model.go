@@ -78,6 +78,12 @@ type Model struct {
 	// Thumbnail for the file under the cursor.
 	thumbHandle uint32
 	thumbData   []byte
+	// Thumbnail lifecycle for the current cursor file, so the preview pane can
+	// show loading/empty/error states instead of mysteriously going blank.
+	thumbLoading       bool   // a fetch is in flight
+	thumbLoadingHandle uint32 // handle the in-flight fetch is for
+	thumbErr           bool   // the last fetch for thumbErrHandle failed
+	thumbErrHandle     uint32 // handle the last failed fetch was for
 
 	// Import state.
 	importing    bool
@@ -435,9 +441,22 @@ func (m Model) updateBrowser(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case thumbMsg:
-		if msg.err == nil && msg.handle == m.currentHandle() {
-			m.thumbHandle = msg.handle
-			m.thumbData = msg.data
+		// Only act on the result for the file currently under the cursor; a
+		// late result for a file we've navigated away from is ignored.
+		if msg.handle == m.currentHandle() {
+			m.thumbLoading = false
+			if msg.err != nil {
+				// Fetch failed: remember the error for this handle. thumbData is
+				// left as-is; it won't match this handle so it isn't shown.
+				m.thumbErr = true
+				m.thumbErrHandle = msg.handle
+			} else {
+				// Success. data may be empty when the camera has no embedded
+				// thumbnail — that's the "empty" case handled by renderThumb.
+				m.thumbErr = false
+				m.thumbHandle = msg.handle
+				m.thumbData = msg.data
+			}
 		}
 		return m, nil
 
@@ -629,6 +648,8 @@ func (m Model) switchCamera() (tea.Model, tea.Cmd) {
 	m.battery = -1
 	m.cursor, m.offset = 0, 0
 	m.thumbHandle, m.thumbData = 0, nil
+	m.thumbLoading, m.thumbLoadingHandle = false, 0
+	m.thumbErr, m.thumbErrHandle = false, 0
 	m.watch = false
 	m.previewOverlay, m.detailOverlay = false, false
 	m.ctrlOverlay, m.ctrlLoading, m.ctrlPending = false, false, false
@@ -857,7 +878,16 @@ func (m *Model) fetchCursorThumb() tea.Cmd {
 	if data, hit := m.thumbs.Cached(f.Handle); hit {
 		m.thumbHandle = f.Handle
 		m.thumbData = data
+		m.thumbLoading = false
 		return nil
+	}
+	// Cache miss: a fetch is now in flight for this handle. Mark it loading and
+	// clear any prior error for this handle so the pane shows "Loading…" rather
+	// than a stale placeholder.
+	m.thumbLoading = true
+	m.thumbLoadingHandle = f.Handle
+	if m.thumbErrHandle == f.Handle {
+		m.thumbErr = false
 	}
 	return thumbCmd(m.thumbs, f.Handle)
 }
