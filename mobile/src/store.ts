@@ -33,6 +33,8 @@ import {
   checkForUpdate,
   markAppReady,
   reloadToApply,
+  SHIPPED_VERSION,
+  WEB_NATIVE_VERSION,
   type OtaManifest,
   type UpdateStatus,
 } from './lib/updater';
@@ -108,6 +110,14 @@ interface AppState {
   updatePending: boolean;
   /** User dismissed the current update banner. */
   updateDismissed: boolean;
+  /** Currently-running web bundle version (for the Settings display). */
+  updateCurrentVersion: string;
+  /** Installed native (APK) version, or the web sentinel on web/demo. */
+  updateNativeVersion: string;
+  /** Last update-check error, if any (shown in the Settings section). */
+  updateLastError: string | null;
+  /** True while a manual "Check for updates" is in flight. */
+  updateChecking: boolean;
 
   // actions
   init: () => Promise<void>;
@@ -145,6 +155,11 @@ interface AppState {
 
   /** Check the OTA manifest for a newer web bundle (debounced, demo-safe). */
   checkForUpdates: () => Promise<void>;
+  /**
+   * User-triggered update check: always runs (no debounce), records versions +
+   * error, and shows a toast summarizing the outcome. Demo-safe.
+   */
+  checkForUpdatesManual: () => Promise<void>;
   /** Download + set the pending OTA bundle, updating progress state. */
   runUpdate: () => Promise<void>;
   /** Reload the webview to apply the pending bundle. */
@@ -220,6 +235,10 @@ export const useStore = create<AppState>((set, get) => ({
   updateProgress: 0,
   updatePending: false,
   updateDismissed: false,
+  updateCurrentVersion: SHIPPED_VERSION,
+  updateNativeVersion: WEB_NATIVE_VERSION,
+  updateLastError: null,
+  updateChecking: false,
 
   async init() {
     const settings = await loadSettings();
@@ -670,9 +689,51 @@ export const useStore = create<AppState>((set, get) => ({
         updateStatus: result.status,
         updateLatest: result.latest,
         updateDismissed: changed ? false : prev.updateDismissed,
+        updateCurrentVersion: result.current,
+        updateNativeVersion: result.native,
+        updateLastError: result.error ?? null,
       });
     } catch {
       /* demo-safe: never surface a checker error */
+    }
+  },
+
+  async checkForUpdatesManual() {
+    if (get().updateChecking) return;
+    set({ updateChecking: true });
+    let result;
+    try {
+      result = await checkForUpdate();
+    } catch (e) {
+      const error = e instanceof Error ? e.message : 'update check failed';
+      set({ updateChecking: false, updateLastError: error });
+      get().toast('Update check failed: ' + error, 'error');
+      await haptics.warn();
+      return;
+    }
+    const prev = get();
+    const changed = result.latest?.version !== prev.updateLatest?.version;
+    set({
+      updateStatus: result.status,
+      updateLatest: result.latest,
+      updateDismissed: changed ? false : prev.updateDismissed,
+      updateCurrentVersion: result.current,
+      updateNativeVersion: result.native,
+      updateLastError: result.error ?? null,
+      updateChecking: false,
+    });
+    // Refresh the debounce clock so the auto-check doesn't immediately re-run.
+    lastUpdateCheck = Date.now();
+
+    if (result.error) {
+      get().toast('Update check failed: ' + result.error, 'error');
+      await haptics.warn();
+    } else if (result.status === 'ota-available') {
+      get().toast('Update available: v' + (result.latest?.version ?? ''), 'info');
+    } else if (result.status === 'native-required') {
+      get().toast('A new version needs a full APK update', 'error');
+    } else {
+      get().toast("You're up to date (v" + result.current + ')', 'success');
     }
   },
 

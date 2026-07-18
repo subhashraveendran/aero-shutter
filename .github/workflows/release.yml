@@ -59,8 +59,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Derive the semver (tag without a leading "v") for stamping into both the
+      # web bundle (__APP_VERSION__) and the Android versionName.
+      - name: Derive app version
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      # Stamp the real release version into the bundled web assets so the
+      # running app reports its true version (see vite.config.ts __APP_VERSION__).
       - name: Build web assets
         run: npm run build
+        env:
+          APP_VERSION: ${{ steps.version.outputs.value }}
 
       - name: Sync Capacitor Android project
         run: npx cap sync android
@@ -68,11 +78,15 @@ jobs:
       # This produces an UNSIGNED debug APK, suitable only for sideloading
       # (users must enable "install from unknown sources"). It is not a
       # release-signed build and should not be published to app stores.
+      # Stamp versionName (tag semver) and versionCode (run number) into the APK
+      # via gradle project properties that android/app/build.gradle reads.
       - name: Build debug APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug \
+            -PversionName="${{ steps.version.outputs.value }}" \
+            -PversionCode="${{ github.run_number }}"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -107,11 +121,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Derive app version
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       # Builds the OTA web bundle with a RELATIVE base ('./') so assets resolve
       # inside the native webview regardless of the served path. Output is in
-      # mobile/dist-ota with index.html at its root.
+      # mobile/dist-ota with index.html at its root. APP_VERSION stamps the
+      # bundle's __APP_VERSION__ so the running app reports its true version.
       - name: Build OTA web bundle
         run: npm run build:ota
+        env:
+          APP_VERSION: ${{ steps.version.outputs.value }}
 
       # Zip the OTA output so index.html sits at the ZIP ROOT (note the trailing
       # "/." — we archive the *contents* of dist-ota, not the directory itself).

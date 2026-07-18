@@ -94,6 +94,25 @@ vi.mock('./lib/haptics', () => ({
   tap: async () => undefined,
 }));
 
+// OTA updater: let tests drive what checkForUpdate() returns so we can assert
+// how checkForUpdatesManual() maps results to state + toasts.
+import type { UpdateCheckResult } from './lib/updater';
+const checkForUpdateMock = vi.fn(async (): Promise<UpdateCheckResult> => ({
+  status: 'up-to-date',
+  latest: null,
+  notes: '',
+  current: '0.8.3',
+  native: '0.0.0-web',
+}));
+vi.mock('./lib/updater', () => ({
+  checkForUpdate: () => checkForUpdateMock(),
+  applyUpdate: vi.fn(async () => ({ pending: true })),
+  reloadToApply: vi.fn(async () => undefined),
+  markAppReady: vi.fn(async () => undefined),
+  SHIPPED_VERSION: '0.8.3',
+  WEB_NATIVE_VERSION: '0.0.0-web',
+}));
+
 import { useStore } from './store';
 
 const resetStore = () =>
@@ -233,5 +252,78 @@ describe('joinCameraWifi → autoConnect', () => {
     useStore.setState({ joiningWifi: true });
     await useStore.getState().joinCameraWifi();
     expect(joinWifiMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('checkForUpdatesManual', () => {
+  beforeEach(() => {
+    checkForUpdateMock.mockReset();
+    useStore.setState({
+      updateChecking: false,
+      updateStatus: 'up-to-date',
+      updateLatest: null,
+      updateLastError: null,
+      updateDismissed: false,
+      toasts: [],
+    });
+  });
+
+  it('reports up-to-date with the current version and a success toast', async () => {
+    checkForUpdateMock.mockResolvedValue({
+      status: 'up-to-date',
+      latest: null,
+      notes: '',
+      current: '0.8.3',
+      native: '0.0.0-web',
+    });
+
+    await useStore.getState().checkForUpdatesManual();
+
+    const s = useStore.getState();
+    expect(s.updateChecking).toBe(false);
+    expect(s.updateCurrentVersion).toBe('0.8.3');
+    expect(s.updateLastError).toBeNull();
+    const toast = s.toasts[s.toasts.length - 1];
+    expect(toast?.kind).toBe('success');
+    expect(toast?.message).toContain('up to date');
+    expect(toast?.message).toContain('0.8.3');
+  });
+
+  it('reports an available OTA update with the version toast', async () => {
+    checkForUpdateMock.mockResolvedValue({
+      status: 'ota-available',
+      latest: { version: '0.9.0', url: 'https://example.com/b.zip', notes: '' },
+      notes: '',
+      current: '0.8.3',
+      native: '0.8.3',
+    });
+
+    await useStore.getState().checkForUpdatesManual();
+
+    const s = useStore.getState();
+    expect(s.updateStatus).toBe('ota-available');
+    expect(s.updateLatest?.version).toBe('0.9.0');
+    const toast = s.toasts[s.toasts.length - 1];
+    expect(toast?.message).toContain('Update available');
+    expect(toast?.message).toContain('0.9.0');
+  });
+
+  it('surfaces a check error via updateLastError and an error toast', async () => {
+    checkForUpdateMock.mockResolvedValue({
+      status: 'up-to-date',
+      latest: null,
+      notes: '',
+      current: '0.8.3',
+      native: '0.8.3',
+      error: 'offline',
+    });
+
+    await useStore.getState().checkForUpdatesManual();
+
+    const s = useStore.getState();
+    expect(s.updateLastError).toBe('offline');
+    const toast = s.toasts[s.toasts.length - 1];
+    expect(toast?.kind).toBe('error');
+    expect(toast?.message).toContain('offline');
   });
 });

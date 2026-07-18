@@ -3,12 +3,14 @@ import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 
-// The shipped app version, sourced from package.json. Injected as
-// __APP_VERSION__ so the OTA updater has a sane fallback bundle version when
-// the Capgo plugin has no downloaded bundle yet (fresh APK install).
+// The shipped app version, injected as __APP_VERSION__ so the OTA updater has a
+// sane fallback bundle version when the Capgo plugin has no downloaded bundle
+// yet (fresh APK install). In CI we stamp the real release tag via the
+// APP_VERSION env var; for local/dev builds we fall back to package.json.
 const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8')) as {
   version: string;
 };
+const appVersion = process.env.APP_VERSION?.trim() || pkg.version;
 
 // OTA builds must resolve assets relative to index.html ('./assets/...') so the
 // bundle works when served from an arbitrary path inside the native webview.
@@ -21,7 +23,7 @@ const isOtaBuild = !!process.env.OTA_BUILD;
 export default defineConfig({
   base: isOtaBuild ? './' : process.env.VITE_BASE || '/',
   define: {
-    __APP_VERSION__: JSON.stringify(pkg.version),
+    __APP_VERSION__: JSON.stringify(appVersion),
   },
   plugins: [react()],
   resolve: {

@@ -1,6 +1,6 @@
 {
   "name": "aero-shutter-mobile",
-  "version": "0.7.0",
+  "version": "0.8.3",
   "description": "Phone companion for aero-shutter: connect to Wi-Fi Nikon cameras over PTP/IP, browse, import and control.",
   "private": true,
   "type": "module",

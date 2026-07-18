@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { useStore } from '../store';
 import type { Destination } from '../lib/settings';
 import { CheckIcon } from '../components/icons';
+import { RELEASES_PAGE_URL, WEB_NATIVE_VERSION } from '../lib/updater';
 
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -20,6 +22,96 @@ const DESTINATIONS: { id: Destination; title: string; sub: string }[] = [
   { id: 'files', title: 'Files folder', sub: 'User-visible Documents/AeroShutter' },
   { id: 'off', title: 'Off (browse only)', sub: 'Do not save imported photos' },
 ];
+
+// Visible, testable "Software update" panel. Shows the running version(s), a
+// prominent manual check button, and a status line that reflects the last
+// check — so the OTA flow is verifiable on a real device instead of relying
+// only on the silent auto-banner.
+function SoftwareUpdate() {
+  const current = useStore((s) => s.updateCurrentVersion);
+  const native = useStore((s) => s.updateNativeVersion);
+  const status = useStore((s) => s.updateStatus);
+  const latest = useStore((s) => s.updateLatest);
+  const error = useStore((s) => s.updateLastError);
+  const checking = useStore((s) => s.updateChecking);
+  const applying = useStore((s) => s.updateApplying);
+  const progress = useStore((s) => s.updateProgress);
+  const pending = useStore((s) => s.updatePending);
+  const checkManual = useStore((s) => s.checkForUpdatesManual);
+  const checkAuto = useStore((s) => s.checkForUpdates);
+  const runUpdate = useStore((s) => s.runUpdate);
+  const applyPending = useStore((s) => s.applyPendingUpdate);
+
+  // Populate the version fields on mount (auto-check is debounced + demo-safe).
+  useEffect(() => {
+    void checkAuto();
+  }, [checkAuto]);
+
+  const isNativeShell = native !== WEB_NATIVE_VERSION;
+  const versionLine = isNativeShell ? `web v${current} · app v${native}` : `web v${current}`;
+
+  const openReleases = () => {
+    if (typeof window !== 'undefined') window.open(RELEASES_PAGE_URL, '_blank');
+  };
+
+  return (
+    <div className="settings-group">
+      <div className="group-title">Software update</div>
+      <div className="card update-card">
+        <div className="update-version">
+          <div className="setting-label">
+            <strong>Current version</strong>
+            <span className="update-ver-line">{versionLine}</span>
+          </div>
+        </div>
+
+        <button
+          className="btn btn-primary btn-block"
+          onClick={() => void checkManual()}
+          disabled={checking}
+        >
+          {checking ? (
+            <>
+              <span className="update-spinner" aria-hidden="true" /> Checking…
+            </>
+          ) : (
+            'Check for updates'
+          )}
+        </button>
+
+        <div className="update-status" role="status" aria-live="polite">
+          {error ? (
+            <span className="update-error">{error}</span>
+          ) : status === 'ota-available' ? (
+            <>
+              <span>Update available (v{latest?.version ?? ''})</span>
+              {pending ? (
+                <button className="btn btn-ghost update-inline-btn" onClick={() => void applyPending()}>
+                  Restart to apply
+                </button>
+              ) : applying ? (
+                <span className="update-progress-inline">{progress}%</span>
+              ) : (
+                <button className="btn btn-ghost update-inline-btn" onClick={() => void runUpdate()}>
+                  Update now
+                </button>
+              )}
+            </>
+          ) : status === 'native-required' ? (
+            <>
+              <span>Full update required</span>
+              <button className="btn btn-ghost update-inline-btn" onClick={openReleases}>
+                Get APK
+              </button>
+            </>
+          ) : (
+            <span className="update-uptodate">Up to date</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function SettingsScreen() {
   const settings = useStore((s) => s.settings);
@@ -132,6 +224,8 @@ export function SettingsScreen() {
             </div>
           </div>
         </div>
+
+        <SoftwareUpdate />
 
         <div className="settings-group">
           <button className="btn btn-ghost btn-block" onClick={() => void disconnect()}>

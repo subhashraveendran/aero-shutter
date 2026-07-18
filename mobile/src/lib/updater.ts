@@ -19,7 +19,7 @@
 // Everything NO-OPs gracefully on web / demo (no native plugin present): checks
 // resolve to 'up-to-date' and apply/reload do nothing.
 
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { compareVersions, isNewer, satisfiesMin } from './semver';
 
 /** Stable "latest" download URLs on our own GitHub Releases (no Capgo cloud). */
@@ -57,6 +57,12 @@ export interface UpdateCheckResult {
   latest: OtaManifest | null;
   /** Convenience copy of the notes for the UI. */
   notes: string;
+  /** Currently-running web bundle version (for display). */
+  current: string;
+  /** Installed native (APK) version (for display). */
+  native: string;
+  /** Populated when the check failed (offline / blocked / malformed). */
+  error?: string;
 }
 
 /** True when running inside a native Capacitor shell (not web / demo). */
@@ -142,9 +148,21 @@ export async function markAppReady(): Promise<void> {
 /** Fetch and parse ota.json with a cache-busting query param. */
 async function fetchManifest(signal?: AbortSignal): Promise<OtaManifest | null> {
   const url = `${OTA_MANIFEST_URL}?t=${Date.now()}`;
-  const res = await fetch(url, { cache: 'no-store', signal });
-  if (!res.ok) throw new Error(`manifest HTTP ${res.status}`);
-  const data = (await res.json()) as Partial<OtaManifest>;
+  let data: Partial<OtaManifest>;
+  if (isNative()) {
+    // Use Capacitor's native HTTP, NOT window.fetch: inside the app webview a
+    // request to github.com is cross-origin, and GitHub's asset host does not
+    // send Access-Control-Allow-Origin, so a plain fetch() is blocked by CORS
+    // and the update check silently fails. Native HTTP has no CORS and follows
+    // the release "latest/download" redirect.
+    const res = await CapacitorHttp.get({ url, headers: { Accept: 'application/json' } });
+    if (res.status < 200 || res.status >= 300) throw new Error(`manifest HTTP ${res.status}`);
+    data = (typeof res.data === 'string' ? JSON.parse(res.data) : res.data) as Partial<OtaManifest>;
+  } else {
+    const res = await fetch(url, { cache: 'no-store', signal });
+    if (!res.ok) throw new Error(`manifest HTTP ${res.status}`);
+    data = (await res.json()) as Partial<OtaManifest>;
+  }
   if (!data || typeof data.version !== 'string' || typeof data.url !== 'string') {
     throw new Error('malformed ota.json');
   }
@@ -183,20 +201,37 @@ export function decideUpdate(
  */
 export async function checkForUpdate(signal?: AbortSignal): Promise<UpdateCheckResult> {
   if (!isNative()) {
-    return { status: 'up-to-date', latest: null, notes: '' };
+    return {
+      status: 'up-to-date',
+      latest: null,
+      notes: '',
+      current: SHIPPED_VERSION,
+      native: WEB_NATIVE_VERSION,
+    };
   }
+  const [bundleVersion, nativeVersion] = await Promise.all([
+    getCurrentBundleVersion(),
+    getNativeVersion(),
+  ]);
+  const current = bundleVersion ?? SHIPPED_VERSION;
   try {
     const manifest = await fetchManifest(signal);
-    if (!manifest) return { status: 'up-to-date', latest: null, notes: '' };
-    const [bundleVersion, nativeVersion] = await Promise.all([
-      getCurrentBundleVersion(),
-      getNativeVersion(),
-    ]);
-    const status = decideUpdate(manifest, bundleVersion ?? SHIPPED_VERSION, nativeVersion);
-    return { status, latest: manifest, notes: manifest.notes ?? '' };
-  } catch {
-    // Offline / rate-limited / malformed manifest: behave as up-to-date.
-    return { status: 'up-to-date', latest: null, notes: '' };
+    if (!manifest) {
+      return { status: 'up-to-date', latest: null, notes: '', current, native: nativeVersion };
+    }
+    const status = decideUpdate(manifest, current, nativeVersion);
+    return { status, latest: manifest, notes: manifest.notes ?? '', current, native: nativeVersion };
+  } catch (e) {
+    // Offline / rate-limited / malformed manifest. Surface the error for the
+    // manual "Check for updates" UI; the auto-check treats it as up-to-date.
+    return {
+      status: 'up-to-date',
+      latest: null,
+      notes: '',
+      current,
+      native: nativeVersion,
+      error: e instanceof Error ? e.message : 'update check failed',
+    };
   }
 }
 
