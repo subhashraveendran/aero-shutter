@@ -28,11 +28,17 @@ vi.mock('./lib/ptpip/client', () => {
         throw new Error('probe refused');
       }
     }
+    setEventHandler() {
+      /* noop */
+    }
+    setDisconnectHandler() {
+      /* noop */
+    }
     async close() {
       /* noop */
     }
   }
-  return { PtpIpClient };
+  return { PtpIpClient, defaultHostName: () => 'aero-shutter/test (test)' };
 });
 
 // candidateHosts / discovery: return a fixed candidate list.
@@ -73,7 +79,10 @@ vi.mock('./lib/camera', () => ({
       cameraConnected = false;
     },
     listPhotos: (onProgress?: ProgressCb) => listPhotosImpl(onProgress),
+    transferList: async () => [],
     keepAlive: () => keepAliveMock(),
+    setObjectAddedHandler: (_cb: unknown) => undefined,
+    setDisconnectHandler: (_cb: unknown) => undefined,
   },
 }));
 
@@ -85,8 +94,18 @@ vi.mock('./lib/db', () => ({
 }));
 
 vi.mock('./lib/settings', () => ({
-  DEFAULT_SETTINGS: { cameraIp: '192.168.1.1', keepInternetOnCellular: true },
-  loadSettings: async () => ({ cameraIp: '192.168.1.1', keepInternetOnCellular: true }),
+  DEFAULT_SETTINGS: {
+    cameraIp: '192.168.1.1',
+    keepInternetOnCellular: true,
+    keepAliveIntervalMs: 9000,
+    autoReconnect: true,
+  },
+  loadSettings: async () => ({
+    cameraIp: '192.168.1.1',
+    keepInternetOnCellular: true,
+    keepAliveIntervalMs: 9000,
+    autoReconnect: true,
+  }),
   saveSettings: async () => undefined,
 }));
 
@@ -136,8 +155,15 @@ const resetStore = () =>
     loadingPhotos: false,
     photoLoadProgress: null,
     keepAliveTimer: null,
+    reconnecting: false,
+    reconnectStatus: '',
     importing: false,
-    settings: { cameraIp: '192.168.1.1', keepInternetOnCellular: true } as never,
+    settings: {
+      cameraIp: '192.168.1.1',
+      keepInternetOnCellular: true,
+      keepAliveIntervalMs: 9000,
+      autoReconnect: false,
+    } as never,
   });
 
 beforeEach(() => {

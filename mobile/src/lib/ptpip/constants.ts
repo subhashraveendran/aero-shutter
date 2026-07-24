@@ -45,7 +45,16 @@ export const OpCode = {
   GetPartialObject: 0x101b,
   // Nikon vendor extension: large thumbnail.
   NikonGetLargeThumb: 0x90c4,
+  // Nikon vendor extensions: "Send to smart device" transfer queue.
+  // SetTransferListLock param = lock mode (3 = lock, 0 = unlock). GetTransferList
+  // returns the AUINT32 array of object handles marked on the camera body.
+  NikonSetTransferListLock: 0x9407,
+  NikonGetTransferList: 0x9408,
 } as const;
+
+// Transfer-list lock modes for NikonSetTransferListLock (match Nikon WMU usage).
+export const TransferListLock = 3;
+export const TransferListUnlock = 0;
 
 // PTP response codes.
 export const RespCode = {
@@ -58,6 +67,19 @@ export const RespCode = {
   InvalidObjectHandle: 0x2009,
   AccessDenied: 0x200f,
 } as const;
+
+// PTP/IP event codes (carried in Event packets on the event channel).
+export const EventCode = {
+  ObjectAdded: 0x4002,
+  ObjectRemoved: 0x4003,
+  StoreAdded: 0x4004,
+  StoreRemoved: 0x4005,
+  DevicePropChanged: 0x4006,
+  StoreFull: 0x400a,
+  CaptureComplete: 0x400d,
+} as const;
+
+export type EventCodeValue = (typeof EventCode)[keyof typeof EventCode];
 
 // PTP datatype codes used in DevicePropDesc.
 export const DataType = {

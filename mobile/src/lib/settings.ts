@@ -20,6 +20,10 @@ export interface Settings {
   keepInternetOnCellular: boolean;
   /** Fire local notifications on import-complete and new-shot events. */
   notifyOnImport: boolean;
+  /** Keep-alive ping interval in ms while connected + idle (fix #1). */
+  keepAliveIntervalMs: number;
+  /** Auto-reconnect with exponential backoff after a disconnect (fix #5). */
+  autoReconnect: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -31,6 +35,8 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'dark',
   keepInternetOnCellular: true,
   notifyOnImport: true,
+  keepAliveIntervalMs: 9000,
+  autoReconnect: true,
 };
 
 const KEY = 'aero-shutter.settings';

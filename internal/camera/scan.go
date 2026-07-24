@@ -122,7 +122,7 @@ func probeCandidates(ctx context.Context, candidates []string) []string {
 func Identify(ctx context.Context, addr string) (Info, error) {
 	ictx, cancel := context.WithTimeout(ctx, identifyTimeout)
 	defer cancel()
-	cl := ptpip.NewClient("aero-shutter")
+	cl := ptpip.NewClient(friendlyName())
 	if err := cl.Connect(ictx, addr); err != nil {
 		return Info{}, err
 	}

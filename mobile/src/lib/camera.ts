@@ -2,8 +2,8 @@
 // fetching, streamed downloads to the filesystem and device-property control.
 
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
-import { PtpIpClient } from './ptpip/client';
-import { PropCode } from './ptpip/constants';
+import { PtpIpClient, defaultHostName } from './ptpip/client';
+import { EventCode, PropCode, TransferListLock, TransferListUnlock } from './ptpip/constants';
 import { formatOf, type PhotoFormat } from './ptpip/objectinfo';
 import {
   formatPropValue,
@@ -56,13 +56,48 @@ export class CameraService {
   /** How the camera socket was bound to the network ('wifi-bound', etc). */
   networkBinding: string | null = null;
 
+  // App-level callbacks re-applied to each freshly-connected client so they
+  // survive reconnects. Set once by the store; the store owns the logic.
+  private onObjectAdded: (() => void) | null = null;
+  private onDisconnected: ((reason: string) => void) | null = null;
+
+  /**
+   * Register a callback fired when the camera reports a new object (fix #3),
+   * e.g. a fresh shot. Persisted across reconnects.
+   */
+  setObjectAddedHandler(cb: (() => void) | null): void {
+    this.onObjectAdded = cb;
+    this.applyHandlers();
+  }
+
+  /**
+   * Register a callback fired once when the underlying link is detected dead
+   * (fix #4). Persisted across reconnects.
+   */
+  setDisconnectHandler(cb: ((reason: string) => void) | null): void {
+    this.onDisconnected = cb;
+    this.applyHandlers();
+  }
+
+  /** Wire the current app-level callbacks onto the active client. */
+  private applyHandlers(): void {
+    const client = this.client;
+    if (!client) return;
+    client.setEventHandler((event) => {
+      if (event.eventCode === EventCode.ObjectAdded) this.onObjectAdded?.();
+    });
+    client.setDisconnectHandler((reason) => this.onDisconnected?.(reason));
+  }
+
   async connect(host: string, port = 15740, bindWifi = true): Promise<void> {
-    const client = new PtpIpClient(host, port, 'AeroShutter', bindWifi);
+    const client = new PtpIpClient(host, port, defaultHostName(), bindWifi);
     await client.connect();
     await client.openSession();
     this.client = client;
     this.cameraModel = client.responderName || 'Camera';
     this.networkBinding = client.networkBinding;
+    // Re-apply any registered app-level handlers to the new client.
+    this.applyHandlers();
   }
 
   get connected(): boolean {
@@ -137,6 +172,54 @@ export class CameraService {
     // authoritative sort key and matches what the store expects).
     photos.sort((a, b) => (b.captureEpochMs ?? 0) - (a.captureEpochMs ?? 0));
     return photos;
+  }
+
+  /**
+   * Photos the user marked on the camera body for "Send to smart device"
+   * (Nikon vendor ops 0x9407 lock / 0x9408 read). Locks the queue, resolves each
+   * handle to a Photo, then unlocks. Returns [] on bodies that don't implement
+   * the vendor ops (so "unsupported" and "empty queue" look the same). This is
+   * the camera-initiated counterpart to ObjectAdded auto-import.
+   */
+  async transferList(): Promise<Photo[]> {
+    const client = this.require();
+    try {
+      await client.setTransferListLock(TransferListLock);
+    } catch {
+      return []; // vendor op unsupported: no camera-marked queue
+    }
+    try {
+      const handles = await client.getTransferList();
+      const photos: Photo[] = [];
+      for (const handle of handles) {
+        try {
+          const info = await client.getObjectInfo(handle);
+          if (info.associationType !== 0) continue; // skip folders
+          photos.push({
+            handle,
+            filename: info.filename,
+            size: info.objectCompressedSize,
+            format: formatOf(info.objectFormat, info.filename),
+            width: info.imagePixWidth,
+            height: info.imagePixHeight,
+            captureEpochMs: info.captureEpochMs,
+          });
+        } catch {
+          // Skip a single unreadable handle; keep going.
+        }
+      }
+      photos.sort((a, b) => (b.captureEpochMs ?? 0) - (a.captureEpochMs ?? 0));
+      return photos;
+    } catch {
+      return [];
+    } finally {
+      // Best-effort unlock so we never leave the camera queue locked.
+      try {
+        await client.setTransferListLock(TransferListUnlock);
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   /** Lightweight keep-alive round-trip; throws on a dead link. */

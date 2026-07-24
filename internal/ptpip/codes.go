@@ -88,6 +88,18 @@ const (
 	// (~640px) JPEG preview than the standard GetThumb thumbnail. Not every
 	// body supports it; callers must fall back to OpGetThumb on a PTP error.
 	OpNikonGetLargeThumb OpCode = 0x90C4
+
+	// OpNikonSetTransferListLock (0x9407) locks/unlocks the camera's
+	// "Send to smart device" transfer queue so the app can read it without the
+	// camera mutating it underneath us. Param: lock mode (3 = lock, 0 = unlock),
+	// matching Nikon's Wireless Mobile Utility. Vendor op; unsupported bodies
+	// answer a PTP error, so callers must degrade gracefully.
+	OpNikonSetTransferListLock OpCode = 0x9407
+
+	// OpNikonGetTransferList (0x9408) returns the array of object handles the
+	// user marked on the camera body for "Send to smart device". The data-in
+	// phase is a standard PTP AUINT32 handle array. Vendor op; may be unsupported.
+	OpNikonGetTransferList OpCode = 0x9408
 )
 
 // ResponseCode is a PTP response code returned in an OperationResponse.
@@ -153,6 +165,42 @@ func (c ResponseCode) String() string {
 		return "SessionAlreadyOpen"
 	default:
 		return fmt.Sprintf("ResponseCode(0x%04X)", uint16(c))
+	}
+}
+
+// EventCode is a PTP event code delivered on the event connection.
+type EventCode uint16
+
+// PTP event codes dispatched by the event loop.
+const (
+	EventObjectAdded       EventCode = 0x4002
+	EventObjectRemoved     EventCode = 0x4003
+	EventStoreAdded        EventCode = 0x4004
+	EventStoreRemoved      EventCode = 0x4005
+	EventDevicePropChanged EventCode = 0x4006
+	EventStoreFull         EventCode = 0x400A
+	EventCaptureComplete   EventCode = 0x400D
+)
+
+// String returns a human-readable name for the event code.
+func (c EventCode) String() string {
+	switch c {
+	case EventObjectAdded:
+		return "ObjectAdded"
+	case EventObjectRemoved:
+		return "ObjectRemoved"
+	case EventStoreAdded:
+		return "StoreAdded"
+	case EventStoreRemoved:
+		return "StoreRemoved"
+	case EventDevicePropChanged:
+		return "DevicePropChanged"
+	case EventStoreFull:
+		return "StoreFull"
+	case EventCaptureComplete:
+		return "CaptureComplete"
+	default:
+		return fmt.Sprintf("EventCode(0x%04X)", uint16(c))
 	}
 }
 

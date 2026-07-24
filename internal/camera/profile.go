@@ -55,7 +55,7 @@ func nikonWiFiProfile(name, match string) Profile {
 		SupportsPartialObject: true,
 		Thumbnails:            ThumbGetThumb,
 		LargeThumb:            true,
-		ChunkSize:             1 << 20, // 1 MiB
+		ChunkSize:             4 << 20, // 4 MiB: fewer GetPartialObject round-trips = higher Wi-Fi throughput
 	}
 }
 
@@ -72,7 +72,7 @@ var GenericProfile = Profile{
 	Port:                  15740,
 	SupportsPartialObject: false,
 	Thumbnails:            ThumbGetThumb,
-	ChunkSize:             1 << 20,
+	ChunkSize:             4 << 20,
 }
 
 // Profiles lists all known camera profiles, most specific first. Four-digit

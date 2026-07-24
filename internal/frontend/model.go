@@ -21,6 +21,7 @@ import (
 	"github.com/subhashraveendran/aero-shutter/internal/config"
 	"github.com/subhashraveendran/aero-shutter/internal/database"
 	"github.com/subhashraveendran/aero-shutter/internal/importer"
+	"github.com/subhashraveendran/aero-shutter/internal/ptpip"
 	"github.com/subhashraveendran/aero-shutter/internal/thumbnail"
 )
 
@@ -74,6 +75,11 @@ type Model struct {
 	filterIdx  int
 	refreshing bool
 	watch      bool
+
+	// Auto-reconnect status shown in the browser while the link is being
+	// re-established after an unexpected drop.
+	reconnecting bool
+	reconnectMsg string
 
 	// Thumbnail for the file under the cursor.
 	thumbHandle uint32
@@ -241,6 +247,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.showToast("open failed: "+msg.err.Error(), true)
 		}
 		return m, nil
+
+	case cameraEventMsg:
+		return m.handleCameraEvent(msg)
+
+	case linkLostMsg:
+		return m.handleLinkLost(msg)
+
+	case reconnectMsg:
+		return m.handleReconnect(msg)
 	}
 
 	switch m.screen {
@@ -269,6 +284,71 @@ func (m Model) showToast(text string, isErr bool) (tea.Model, tea.Cmd) {
 	m.toastErr = isErr
 	m.toastID++
 	return m, toastClearCmd(m.toastID)
+}
+
+// handleCameraEvent reacts to a decoded camera event. ObjectAdded triggers an
+// immediate photo-list refresh (fix #3) instead of waiting for the 5s poll, so
+// a freshly shot frame appears at once. The refresh feeds the existing
+// auto-import path, so a new photo is queued for import when watch + auto-import
+// are on. It is harmless when idle: a refresh with no new files is a no-op.
+func (m Model) handleCameraEvent(msg cameraEventMsg) (tea.Model, tea.Cmd) {
+	if ptpip.EventCode(msg.ev.Code) != ptpip.EventObjectAdded {
+		return m, nil
+	}
+	if m.screen != screenBrowser {
+		return m, nil
+	}
+	if m.refreshing || m.importing {
+		return m, nil
+	}
+	m.refreshing = true
+	return m, refreshCmd(m.cam, m.db)
+}
+
+// handleLinkLost fires when the camera link drops in the background. It starts
+// the auto-reconnect loop (idempotent: the camera guarantees a single loop) and
+// surfaces the reconnecting status in the browser.
+func (m Model) handleLinkLost(_ linkLostMsg) (tea.Model, tea.Cmd) {
+	// Stop keep-alive; it will be resumed by the camera on a successful
+	// reconnect.
+	m.cam.StopKeepAlive()
+	m.reconnecting = true
+	m.reconnectMsg = "connection lost — reconnecting…"
+	// Kick off the backoff loop against the last address.
+	m.cam.Reconnect(m.cfg.KeepAliveInterval())
+	return m, nil
+}
+
+// handleReconnect surfaces auto-reconnect progress and, on success, resumes the
+// browser with a fresh inventory refresh.
+func (m Model) handleReconnect(msg reconnectMsg) (tea.Model, tea.Cmd) {
+	s := msg.state
+	switch {
+	case s.Connected:
+		m.reconnecting = false
+		m.reconnectMsg = ""
+		if m.screen == screenBrowser && !m.refreshing && !m.importing {
+			m.refreshing = true
+			return m, tea.Batch(m.spin.Tick, refreshCmd(m.cam, m.db))
+		}
+		return m, nil
+	case s.GaveUp:
+		m.reconnecting = false
+		m.reconnectMsg = ""
+		return m, nil
+	case s.Err != nil:
+		m.reconnecting = true
+		m.reconnectMsg = fmt.Sprintf("reconnect attempt %d failed — retrying…", s.Attempt)
+		return m, m.spin.Tick
+	default:
+		m.reconnecting = true
+		if s.Waiting > 0 {
+			m.reconnectMsg = fmt.Sprintf("reconnecting in %s (attempt %d)…", s.Waiting.Truncate(time.Second), s.Attempt)
+		} else {
+			m.reconnectMsg = fmt.Sprintf("reconnecting (attempt %d)…", s.Attempt)
+		}
+		return m, m.spin.Tick
+	}
 }
 
 // ---- Connect screen ----------------------------------------------------
@@ -348,6 +428,11 @@ func (m Model) updateConnect(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.picker = false
 		m.screen = screenBrowser
 		m.refreshing = true
+		m.reconnecting = false
+		m.reconnectMsg = ""
+		// Start the app-level keep-alive so an idle link is detected promptly
+		// and, on failure, routed into auto-reconnect via OnDisconnect.
+		m.cam.StartKeepAlive(m.cfg.KeepAliveInterval())
 		var cmds []tea.Cmd
 		cmds = append(cmds, m.spin.Tick, refreshCmd(m.cam, m.db))
 		return m, tea.Batch(cmds...)
@@ -417,6 +502,12 @@ func (m Model) updateBrowser(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshMsg:
 		m.refreshing = false
 		if msg.err != nil {
+			// If auto-reconnect is already handling a dropped link, stay in the
+			// browser and let the reconnect status drive the UI instead of
+			// bouncing to the connect screen.
+			if m.reconnecting {
+				return m, nil
+			}
 			if !m.cam.Connected() {
 				m.screen = screenConnect
 				m.connectErr = "connection lost: " + msg.err.Error()
@@ -925,9 +1016,19 @@ func humanSpeed(bps float64) string {
 }
 
 // Run starts the Bubble Tea program in the alternate screen with mouse
-// support (wheel scrolling, row clicks, help-bar shortcuts).
+// support (wheel scrolling, row clicks, help-bar shortcuts). It wires the
+// camera's async callbacks (events, disconnect, reconnect) into the program's
+// message loop so background link changes surface in the UI.
 func Run(cfg config.Config, db *database.DB) error {
-	p := tea.NewProgram(New(cfg, db), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	m := New(cfg, db)
+	m.cam.SetDialTimeout(cfg.DialTimeout())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+
+	cam := m.cam
+	cam.OnEvent(func(ev ptpip.Event) { p.Send(cameraEventMsg{ev: ev}) })
+	cam.OnDisconnect(func(err error) { p.Send(linkLostMsg{err: err}) })
+	cam.OnReconnect(func(s camera.ReconnectState) { p.Send(reconnectMsg{state: s}) })
+
 	_, err := p.Run()
 	return err
 }

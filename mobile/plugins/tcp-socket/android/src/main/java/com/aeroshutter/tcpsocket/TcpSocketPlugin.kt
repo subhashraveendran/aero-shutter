@@ -74,6 +74,15 @@ import java.util.concurrent.atomic.AtomicReference
 )
 class TcpSocketPlugin : Plugin() {
 
+    companion object {
+        // SO_RCVBUF requested on every camera socket. PTP/IP throughput over
+        // Wi-Fi is capped by the TCP receive window (bandwidth-delay product);
+        // a larger receive buffer keeps more data in flight between chunks. This
+        // mirrors the setTcpRecvBuf tuning in Nikon's Wireless Mobile Utility.
+        // Must be set BEFORE connect() so it is negotiated during window scaling.
+        private const val RECV_BUFFER_BYTES = 4 * 1024 * 1024
+    }
+
     private data class Conn(
         val socket: Socket,
         val networkCallback: ConnectivityManager.NetworkCallback?,
@@ -116,6 +125,8 @@ class TcpSocketPlugin : Plugin() {
                     // Anti-auto-disconnect: enable TCP keepalive so an idle
                     // camera link isn't silently dropped by the OS/router.
                     socket.keepAlive = true
+                    // Throughput: enlarge the TCP receive window (see RECV_BUFFER_BYTES).
+                    try { socket.receiveBufferSize = RECV_BUFFER_BYTES } catch (_: Exception) {}
                     socket.connect(InetSocketAddress(host, port), timeoutMs)
                     ConnectOutcome(socket, null, "default")
                 }
@@ -187,6 +198,8 @@ class TcpSocketPlugin : Plugin() {
                     // Anti-auto-disconnect: TCP keepalive on the Wi-Fi-bound
                     // camera socket so the idle PTP/IP link stays up.
                     socket.keepAlive = true
+                    // Throughput: enlarge the TCP receive window (see RECV_BUFFER_BYTES).
+                    try { socket.receiveBufferSize = RECV_BUFFER_BYTES } catch (_: Exception) {}
                     try {
                         socket.connect(InetSocketAddress(host, port), timeoutMs)
                         tryClaim(ConnectOutcome(socket, acquired.second, "wifi-bound"))
@@ -211,6 +224,8 @@ class TcpSocketPlugin : Plugin() {
                 // Anti-auto-disconnect: TCP keepalive on the default-network
                 // camera socket path too.
                 socket.keepAlive = true
+                // Throughput: enlarge the TCP receive window (see RECV_BUFFER_BYTES).
+                try { socket.receiveBufferSize = RECV_BUFFER_BYTES } catch (_: Exception) {}
                 socket.connect(InetSocketAddress(host, port), timeoutMs)
                 tryClaim(ConnectOutcome(socket, null, "default"))
             } catch (e: Exception) {
@@ -291,7 +306,10 @@ class TcpSocketPlugin : Plugin() {
     }
 
     private fun readLoop(socketId: String, socket: Socket) {
-        val buffer = ByteArray(8 * 1024)
+        // Larger read buffer: each delivered chunk crosses the native->JS bridge
+        // and is base64-encoded, so bigger reads mean far fewer (expensive) bridge
+        // crossings during a bulk photo transfer.
+        val buffer = ByteArray(256 * 1024)
         try {
             val input = socket.getInputStream()
             while (!socket.isClosed) {

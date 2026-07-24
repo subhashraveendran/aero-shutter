@@ -91,8 +91,14 @@ public class TcpSocketPlugin: CAPPlugin {
         connection.start(queue: queue)
     }
 
+    // Read chunk size. Each delivered chunk crosses the native->JS bridge and is
+    // base64-encoded, so larger reads mean far fewer (expensive) bridge crossings
+    // during a bulk photo transfer. Network.framework auto-tunes the TCP receive
+    // window, so this read size is the main iOS throughput lever.
+    private static let receiveChunkBytes = 256 * 1024
+
     private func receive(socketId: String, connection: NWConnection) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 8 * 1024) { [weak self] data, _, isComplete, error in
+        connection.receive(minimumIncompleteLength: 1, maximumLength: Self.receiveChunkBytes) { [weak self] data, _, isComplete, error in
             guard let self = self else { return }
             if let data = data, !data.isEmpty {
                 self.notifyListeners("data", data: [

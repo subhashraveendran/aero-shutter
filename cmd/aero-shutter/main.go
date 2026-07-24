@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/subhashraveendran/aero-shutter/internal/camera"
 	"github.com/subhashraveendran/aero-shutter/internal/config"
 	"github.com/subhashraveendran/aero-shutter/internal/database"
 	"github.com/subhashraveendran/aero-shutter/internal/frontend"
@@ -30,6 +31,9 @@ func main() {
 }
 
 func run() error {
+	// Announce our build version to the camera in the PTP/IP friendly name.
+	camera.HostVersion = version
+
 	cfg, err := config.Load()
 	if err != nil {
 		// A malformed config falls back to defaults; only path resolution

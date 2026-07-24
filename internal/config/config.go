@@ -12,6 +12,14 @@ import (
 	"time"
 )
 
+// Connection-robustness defaults.
+const (
+	// DefaultKeepAliveInterval is the idle PTP keep-alive period.
+	DefaultKeepAliveInterval = 30 * time.Second
+	// DefaultDialTimeout is the TCP dial timeout, matching Nikon's WMU.
+	DefaultDialTimeout = 10 * time.Second
+)
+
 // SavedCamera records a camera that has successfully connected before, so it
 // can be offered in the picker even when it is not currently reachable.
 type SavedCamera struct {
@@ -44,6 +52,13 @@ type Config struct {
 	// PreviewMode selects the terminal preview renderer: "auto" (detect from
 	// the environment), "halfblock", "iterm2" or "kitty".
 	PreviewMode string `json:"preview_mode"`
+	// KeepAliveSeconds is the interval, in seconds, of the app-level PTP
+	// keep-alive round-trip that runs while connected and idle. Zero selects
+	// the default (30s).
+	KeepAliveSeconds int `json:"keep_alive_seconds,omitempty"`
+	// DialTimeoutSeconds is the TCP dial timeout, in seconds, for connecting to
+	// a camera. Zero selects the default (10s, matching WMU).
+	DialTimeoutSeconds int `json:"dial_timeout_seconds,omitempty"`
 	// Cameras lists every camera that has connected successfully, newest
 	// first.
 	Cameras []SavedCamera `json:"cameras,omitempty"`
@@ -81,7 +96,27 @@ func Default() Config {
 		OpenAfterImport:     false,
 		ConcurrentDownloads: 1,
 		PreviewMode:         "auto",
+		KeepAliveSeconds:    int(DefaultKeepAliveInterval / time.Second),
+		DialTimeoutSeconds:  int(DefaultDialTimeout / time.Second),
 	}
+}
+
+// KeepAliveInterval returns the configured idle keep-alive interval, falling
+// back to DefaultKeepAliveInterval when unset or non-positive.
+func (c *Config) KeepAliveInterval() time.Duration {
+	if c.KeepAliveSeconds <= 0 {
+		return DefaultKeepAliveInterval
+	}
+	return time.Duration(c.KeepAliveSeconds) * time.Second
+}
+
+// DialTimeout returns the configured TCP dial timeout, falling back to
+// DefaultDialTimeout when unset or non-positive.
+func (c *Config) DialTimeout() time.Duration {
+	if c.DialTimeoutSeconds <= 0 {
+		return DefaultDialTimeout
+	}
+	return time.Duration(c.DialTimeoutSeconds) * time.Second
 }
 
 // Dir returns the aero-shutter configuration directory.

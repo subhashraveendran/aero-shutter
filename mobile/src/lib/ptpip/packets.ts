@@ -129,6 +129,23 @@ export function decodeOperationResponse(payload: Uint8Array): OperationResponse 
   return { responseCode, transactionId, params };
 }
 
+export interface EventPacket {
+  eventCode: number;
+  transactionId: number;
+  params: number[];
+}
+
+// Event packet payload: eventCode (u16) + transactionId (u32) + up to 3 u32
+// params. Some responders omit the transactionId/params; we read defensively.
+export function decodeEvent(payload: Uint8Array): EventPacket {
+  const r = new ByteReader(payload);
+  const eventCode = r.remaining >= 2 ? r.u16() : 0;
+  const transactionId = r.remaining >= 4 ? r.u32() : 0;
+  const params: number[] = [];
+  while (r.remaining >= 4) params.push(r.u32());
+  return { eventCode, transactionId, params };
+}
+
 // StartData: transactionId (u32) + total length (u64).
 export function encodeStartData(transactionId: number, totalLength: number): Uint8Array {
   const w = new ByteWriter();

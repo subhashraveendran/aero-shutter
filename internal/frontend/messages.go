@@ -11,6 +11,7 @@ import (
 	"github.com/subhashraveendran/aero-shutter/internal/camera"
 	"github.com/subhashraveendran/aero-shutter/internal/database"
 	"github.com/subhashraveendran/aero-shutter/internal/importer"
+	"github.com/subhashraveendran/aero-shutter/internal/ptpip"
 	"github.com/subhashraveendran/aero-shutter/internal/thumbnail"
 )
 
@@ -53,6 +54,17 @@ type importEventMsg struct {
 
 // watchTickMsg fires while watch mode is on.
 type watchTickMsg struct{}
+
+// cameraEventMsg carries a decoded camera event pushed from the event-reader
+// goroutine (e.g. ObjectAdded for instant auto-import).
+type cameraEventMsg struct{ ev ptpip.Event }
+
+// linkLostMsg is delivered when the camera link is observed dead in the
+// background (event-socket failure or a transaction on a dead socket).
+type linkLostMsg struct{ err error }
+
+// reconnectMsg carries an auto-reconnect status update.
+type reconnectMsg struct{ state camera.ReconnectState }
 
 // toastClearMsg expires the current toast.
 type toastClearMsg struct{ id int }

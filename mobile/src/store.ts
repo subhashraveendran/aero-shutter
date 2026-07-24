@@ -21,7 +21,7 @@ import {
   leaveWifi as leaveWifiNative,
   NIKON_SSID_PREFIX,
 } from './lib/wifi';
-import { PtpIpClient } from './lib/ptpip/client';
+import { PtpIpClient, defaultHostName } from './lib/ptpip/client';
 import {
   notifyImportComplete,
   notifyNewPhoto,
@@ -100,6 +100,10 @@ interface AppState {
   autoImportTimer: number | null;
   /** Keep-alive interval handle; pings the camera so it doesn't idle-drop. */
   keepAliveTimer: number | null;
+  /** True while the auto-reconnect backoff loop is running (fix #5). */
+  reconnecting: boolean;
+  /** Human-readable reconnect status, e.g. "Reconnecting… (attempt 3)". */
+  reconnectStatus: string;
 
   // OTA live-update state (self-hosted; no-ops on web/demo).
   /** Result of the last manifest check. 'up-to-date' until proven otherwise. */
@@ -137,6 +141,8 @@ interface AppState {
   refreshWifiSsid: () => Promise<void>;
   /** Internal: finalize state after a successful handshake + session open. */
   _onConnected: (host: string) => Promise<void>;
+  /** Pull + import/surface the camera-marked "Send to smart device" queue. */
+  _pullMarkedTransfers: () => Promise<void>;
   enterDemo: () => Promise<void>;
   disconnect: () => Promise<void>;
   refreshPhotos: () => Promise<void>;
@@ -160,6 +166,17 @@ interface AppState {
   startKeepAlive: () => void;
   /** Stop the keep-alive ping. */
   stopKeepAlive: () => void;
+  /** Internal: handle a detected disconnect — clean up + enter reconnect loop. */
+  _onDisconnected: (reason: string) => void;
+  /**
+   * Auto-reconnect with exponential backoff (1,2,4,8,16,30,30… cap 30s).
+   * Cancellable, single-flight; stops on success or explicit disconnect.
+   */
+  startReconnect: () => Promise<void>;
+  /** Cancel an in-flight reconnect loop. */
+  cancelReconnect: () => void;
+  /** Internal: called on ObjectAdded event — trigger the new-photos path. */
+  _onObjectAdded: () => void;
 
   /** Check the OTA manifest for a newer web bundle (debounced, demo-safe). */
   checkForUpdates: () => Promise<void>;
@@ -179,6 +196,14 @@ interface AppState {
 let toastSeq = 1;
 let importCancelled = false;
 
+// Auto-reconnect control (fix #5). A single generation token cancels any
+// in-flight backoff loop: bumping it makes the running loop bail on its next
+// check, guaranteeing we never stack multiple loops.
+let reconnectGeneration = 0;
+// Exponential backoff schedule in ms, capped at 30s.
+const RECONNECT_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
+const RECONNECT_CAP_MS = 30000;
+
 // OTA manifest check debounce: ignore repeated checks within this window
 // (launch + every resume can both fire checkForUpdates()).
 const UPDATE_CHECK_COOLDOWN_MS = 60_000;
@@ -194,7 +219,7 @@ function filteredNewCount(photos: Photo[], imported: Set<string>): number {
  * rejects on timeout / refusal. Used to race candidate addresses.
  */
 async function probeHost(host: string, timeoutMs: number, bindWifi: boolean): Promise<void> {
-  const client = new PtpIpClient(host, undefined, 'AeroShutter', bindWifi);
+  const client = new PtpIpClient(host, undefined, defaultHostName(), bindWifi);
   try {
     await client.connect(timeoutMs);
   } finally {
@@ -238,6 +263,8 @@ export const useStore = create<AppState>((set, get) => ({
   toasts: [],
   autoImportTimer: null,
   keepAliveTimer: null,
+  reconnecting: false,
+  reconnectStatus: '',
 
   updateStatus: 'up-to-date',
   updateLatest: null,
@@ -256,6 +283,11 @@ export const useStore = create<AppState>((set, get) => ({
     const importedTodayCount = await countImportedToday();
     document.documentElement.dataset.theme = settings.theme;
     set({ settings, importedIds, importedTodayCount });
+    // Wire link-level callbacks once; the camera service re-applies them to
+    // every (re)connected client. ObjectAdded -> instant import path (fix #3),
+    // detected disconnect -> cleanup + auto-reconnect (fix #4/#5).
+    camera.setObjectAddedHandler(() => get()._onObjectAdded());
+    camera.setDisconnectHandler((reason) => get()._onDisconnected(reason));
     // OTA: tell the native layer we booted OK (rollback safety net), then
     // check our self-hosted manifest for a newer web bundle. Both no-op on web.
     void markAppReady();
@@ -462,6 +494,28 @@ export const useStore = create<AppState>((set, get) => ({
     get().startKeepAlive();
     await get().refreshPhotos();
     if (get().settings.autoImport && get().settings.watchMode) get().startAutoImport();
+    // Pull the camera-marked "Send to smart device" queue (Nikon vendor ops
+    // 0x9407/0x9408). No-op on bodies that don't support it. Runs in the
+    // background so it never delays showing the gallery.
+    void get()._pullMarkedTransfers();
+  },
+
+  async _pullMarkedTransfers() {
+    try {
+      const marked = await camera.transferList();
+      if (marked.length === 0) return;
+      const s = get();
+      const fresh = marked.filter((p) => !s.importedIds.has(identityKey(p.filename, p.size)));
+      if (fresh.length === 0) return;
+      if (s.settings.autoImport) {
+        if (s.settings.notifyOnImport) void notifyNewPhoto(fresh[0].filename);
+        await get().importPhotos(fresh);
+      } else {
+        get().toast(`${fresh.length} photo(s) marked on the camera for transfer`, 'info');
+      }
+    } catch {
+      // Vendor op unsupported or transient error: ignore, ObjectAdded/polling cover it.
+    }
   },
 
   async enterDemo() {
@@ -470,6 +524,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   async disconnect() {
+    // Explicit user disconnect: cancel any in-flight auto-reconnect loop first.
+    get().cancelReconnect();
     const t = get().autoImportTimer;
     if (t) window.clearInterval(t);
     get().stopKeepAlive();
@@ -485,6 +541,8 @@ export const useStore = create<AppState>((set, get) => ({
       screen: 'connect',
       autoImportTimer: null,
       keepAliveTimer: null,
+      reconnecting: false,
+      reconnectStatus: '',
       photoLoadProgress: null,
       connectStatus: '',
       networkBinding: null,
@@ -703,11 +761,13 @@ export const useStore = create<AppState>((set, get) => ({
 
   startKeepAlive() {
     if (get().keepAliveTimer) return;
-    // Every ~9s, if the link is connected and NOT busy (importing or mid photo
-    // listing), fire one cheap serialized PTP op. It rides the client mutex so
-    // it can never overlap real work. This defeats the D5300's idle-session /
-    // Wi-Fi drop. On a connection error we disconnect cleanly + toast rather
-    // than spinning forever.
+    // Every keepAliveIntervalMs (default 9s, configurable — fix #1), if the link
+    // is connected and NOT busy (importing or mid photo listing), fire one cheap
+    // serialized PTP op. It rides the client mutex so it can never overlap real
+    // work. This defeats the D5300's idle-session / Wi-Fi drop. On failure the
+    // link is dead: route into the disconnect + auto-reconnect path (fix #5)
+    // rather than just tearing down.
+    const intervalMs = get().settings.keepAliveIntervalMs || DEFAULT_SETTINGS.keepAliveIntervalMs;
     const timer = window.setInterval(async () => {
       const s = get();
       // Short-circuit while busy: a real transaction is already keeping the
@@ -716,12 +776,10 @@ export const useStore = create<AppState>((set, get) => ({
       try {
         await camera.keepAlive();
       } catch (e) {
-        // A failed keep-alive means the link is gone. Bail cleanly.
         const message = e instanceof Error ? e.message : 'Camera link lost';
-        get().toast(`Camera disconnected: ${message}`, 'error');
-        await get().disconnect();
+        get()._onDisconnected(message);
       }
-    }, 9000);
+    }, intervalMs);
     set({ keepAliveTimer: timer });
   },
 
@@ -729,6 +787,107 @@ export const useStore = create<AppState>((set, get) => ({
     const t = get().keepAliveTimer;
     if (t) window.clearInterval(t);
     set({ keepAliveTimer: null });
+  },
+
+  _onDisconnected(reason) {
+    // Fired at most once per connection (client-side single-shot guard) from a
+    // dead event socket, a failed transaction, or a failed keep-alive (fix #4).
+    // Only act if we currently believe we're connected — ignore late/duplicate
+    // signals after an explicit disconnect.
+    if (!get().connected && !get().reconnecting) return;
+    if (get().reconnecting) return; // a loop is already running
+
+    // Tear down the live link's timers + socket state, keeping the address.
+    get().stopKeepAlive();
+    get().stopAutoImport();
+    void camera.disconnect();
+    set({
+      connected: false,
+      photos: [],
+      selection: new Set(),
+      props: [],
+      photoLoadProgress: null,
+    });
+
+    if (get().settings.autoReconnect) {
+      get().toast(`Camera link lost: ${reason} — reconnecting…`, 'error');
+      void get().startReconnect();
+    } else {
+      get().toast(`Camera disconnected: ${reason}`, 'error');
+      set({ screen: 'connect', connectStatus: '' });
+    }
+  },
+
+  async startReconnect() {
+    // Single-flight: bump the generation so any prior loop bails, then claim it.
+    if (get().reconnecting) return;
+    const generation = ++reconnectGeneration;
+    set({ reconnecting: true, connecting: false, connected: false });
+
+    let attempt = 0;
+    // Loop until we reconnect, the generation is superseded, or cancelled.
+    while (generation === reconnectGeneration) {
+      attempt += 1;
+      const delay =
+        RECONNECT_BACKOFF_MS[Math.min(attempt - 1, RECONNECT_BACKOFF_MS.length - 1)] ??
+        RECONNECT_CAP_MS;
+
+      set({ reconnectStatus: `Reconnecting… (attempt ${attempt})`, connectStatus: `Reconnecting… (attempt ${attempt})` });
+
+      // Wait the backoff, checking the generation both before and after so a
+      // cancel during the sleep stops us promptly.
+      await new Promise<void>((resolve) => window.setTimeout(resolve, delay));
+      if (generation !== reconnectGeneration) return;
+
+      try {
+        await get().autoConnect();
+      } catch {
+        // autoConnect swallows its own errors; ignore and back off again.
+      }
+      if (generation !== reconnectGeneration) return;
+
+      if (get().connected) {
+        // Success: autoConnect() -> _onConnected() already resumed keep-alive,
+        // event dispatch, photos + auto-import. Clear reconnect state.
+        set({ reconnecting: false, reconnectStatus: '' });
+        get().toast('Reconnected', 'success');
+        return;
+      }
+      // autoConnect can bail early if it thinks we're still connecting; reset
+      // that flag so the next attempt can proceed.
+      set({ connecting: false });
+    }
+  },
+
+  cancelReconnect() {
+    // Supersede any running loop and clear the UI status.
+    reconnectGeneration++;
+    if (get().reconnecting || get().reconnectStatus) {
+      set({ reconnecting: false, reconnectStatus: '' });
+    }
+  },
+
+  _onObjectAdded() {
+    // Fix #3: a new object landed on the camera. Trigger the app's new-photos
+    // path immediately instead of waiting for the 5s poll. Gated behind the
+    // auto-import/watch toggle when enabled; otherwise a harmless refresh.
+    const s = get();
+    if (!s.connected || s.importing || s.loadingPhotos) return;
+    if (s.settings.autoImport && s.settings.watchMode) {
+      void (async () => {
+        await get().refreshPhotos();
+        const fresh = get();
+        const newOnes = fresh.photos.filter(
+          (p) => !fresh.importedIds.has(identityKey(p.filename, p.size)),
+        );
+        if (newOnes.length > 0) {
+          if (fresh.settings.notifyOnImport) void notifyNewPhoto(newOnes[0].filename);
+          await fresh.importPhotos(newOnes);
+        }
+      })();
+    } else {
+      void get().refreshPhotos();
+    }
   },
 
   async checkForUpdates() {

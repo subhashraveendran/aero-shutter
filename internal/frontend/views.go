@@ -521,6 +521,15 @@ func (m Model) viewBottomBar() string {
 		return lipgloss.JoinVertical(lipgloss.Left, line1, line2, line3)
 	}
 
+	if m.reconnecting {
+		text := m.reconnectMsg
+		if text == "" {
+			text = "reconnecting…"
+		}
+		banner := styleWarn.Render(m.spin.View() + " " + text)
+		return lipgloss.JoinVertical(lipgloss.Left, "", banner)
+	}
+
 	free := ""
 	for _, s := range m.storages {
 		free = fmt.Sprintf("card: %s free of %s", humanBytes(int64(s.Free)), humanBytes(int64(s.Capacity)))
