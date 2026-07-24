@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AeroShutter — Wi-Fi photo transfer for Nikon cameras</title>
+    <meta
+      name="description"
+      content="Pull photos off Wi-Fi-enabled Nikon cameras — D-series DSLRs and Z mirrorless — over Wi-Fi, no cable, no vendor app. A fast click-first terminal app and an iOS/Android companion, both speaking the camera's native PTP/IP protocol."
+    />
+    <meta property="og:title" content="AeroShutter — Wi-Fi photo transfer for Nikon cameras" />
+    <meta property="og:description" content="Fast, cable-free photo import from Wi-Fi Nikon cameras over their native PTP/IP protocol." />
+    <meta property="og:type" content="website" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f0a92b' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='m14.31 8 5.74 9.94M9.69 8h11.48m-13.79 4 5.74-9.94M9.69 16 3.95 6.06M14.31 16H2.83m13.79-4-5.74 9.94'/%3E%3C/svg%3E" />
+    <style>
+      :root {
+        --bg: #0b0d0f;
+        --panel: #14171a;
+        --panel-2: #191d21;
+        --hair: rgba(255, 255, 255, 0.08);
+        --text: #e8e6e1;
+        --dim: #9aa0a6;
+        --amber: #f0a92b;
+        --amber-2: #ffbb45;
+        --amber-soft: rgba(240, 169, 43, 0.13);
+        --radius: 15px;
+        --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+        --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
+        line-height: 1.6; -webkit-font-smoothing: antialiased; overflow-x: hidden;
+      }
+      a { color: var(--amber); text-decoration: none; }
+      .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 2; }
+      svg { display: block; }
+
+      /* Parallax background field */
+      .bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+      .blob { position: absolute; border-radius: 50%; filter: blur(70px); opacity: 0.5; will-change: transform; }
+      .blob.a { width: 640px; height: 640px; top: -220px; left: 50%; margin-left: -320px; background: radial-gradient(circle, rgba(240,169,43,0.22), transparent 70%); }
+      .blob.b { width: 520px; height: 520px; top: 640px; left: -160px; background: radial-gradient(circle, rgba(60,120,200,0.16), transparent 70%); }
+      .blob.c { width: 560px; height: 560px; top: 1500px; right: -200px; background: radial-gradient(circle, rgba(240,169,43,0.12), transparent 70%); }
+      .grid-lines { position: absolute; inset: 0; background-image:
+          linear-gradient(var(--hair) 1px, transparent 1px),
+          linear-gradient(90deg, var(--hair) 1px, transparent 1px);
+        background-size: 46px 46px; opacity: 0.35; mask-image: radial-gradient(circle at 50% 20%, #000 0%, transparent 65%); }
+
+      /* Loader overlay */
+      #loader { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: var(--bg); }
+      #loader .mark { width: 92px; height: 92px; color: var(--amber); }
+      #loader.done { pointer-events: none; }
+
+      /* Nav */
+      nav { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
+      .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -0.01em; }
+      .brand .logo { width: 26px; height: 26px; color: var(--amber); }
+      .brand .amber { color: var(--amber); }
+      .nav-links { display: flex; gap: 22px; font-size: 14px; }
+      .nav-links a { color: var(--dim); transition: color .15s; }
+      .nav-links a:hover { color: var(--text); }
+
+      /* Hero */
+      .hero { padding: 76px 0 60px; text-align: center; }
+      .kicker { display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em;
+        text-transform: uppercase; color: var(--amber); background: var(--amber-soft); border: 1px solid rgba(240,169,43,0.25);
+        padding: 7px 14px; border-radius: 999px; margin-bottom: 24px; }
+      .kicker .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 0 rgba(240,169,43,0.6); }
+      h1 { font-size: clamp(36px, 6.4vw, 64px); line-height: 1.03; letter-spacing: -0.03em; margin: 0 0 18px; }
+      h1 .amber { color: var(--amber); }
+      h1 .word { display: inline-block; }
+      .lede { max-width: 640px; margin: 0 auto 34px; font-size: clamp(16px, 2.2vw, 20px); color: var(--dim); }
+      .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+      .hero-cams { margin: 26px auto 0; max-width: 660px; font-family: var(--mono); font-size: 13px; color: var(--dim);
+        letter-spacing: 0.01em; line-height: 1.9; }
+      .hero-cams b { color: var(--text); font-weight: 600; }
+      .hero-cams a { color: var(--amber); white-space: nowrap; }
+      .btn { display: inline-flex; align-items: center; gap: 9px; padding: 13px 22px; border-radius: 12px; font-weight: 600; font-size: 15px;
+        border: 1px solid var(--hair); transition: transform .14s ease, background .14s ease, border-color .14s ease; }
+      .btn svg { width: 17px; height: 17px; }
+      .btn:hover { transform: translateY(-2px); }
+      .btn-primary { background: var(--amber); color: #17130a; border-color: var(--amber); box-shadow: 0 10px 30px rgba(240,169,43,0.25); }
+      .btn-primary:hover { background: var(--amber-2); }
+      .btn-ghost { background: var(--panel); color: var(--text); }
+      .btn-ghost:hover { border-color: rgba(240,169,43,0.45); }
+
+      /* Terminal mock */
+      .term { margin: 56px auto 0; max-width: 860px; background: #0a0c0e; border: 1px solid var(--hair); border-radius: var(--radius);
+        overflow: hidden; box-shadow: 0 40px 90px rgba(0,0,0,0.55); text-align: left; position: relative; }
+      .term-bar { display: flex; gap: 7px; padding: 12px 14px; border-bottom: 1px solid var(--hair); background: var(--panel); }
+      .term-bar i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+      .term-bar i:nth-child(1) { background: #ff5f57; } .term-bar i:nth-child(2) { background: #febc2e; } .term-bar i:nth-child(3) { background: #28c840; }
+      .term pre { margin: 0; padding: 18px 20px; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; color: #cdd3d8; overflow-x: auto; }
+      .term .g { color: var(--amber); } .term .d { color: #6b7178; }
+      .term .live { position: relative; }
+      .term .bar-fill { color: var(--amber); }
+      .scanline { position: absolute; left: 0; right: 0; top: 0; height: 120px; pointer-events: none;
+        background: linear-gradient(180deg, rgba(240,169,43,0.12), transparent); opacity: 0; }
+
+      /* Sections */
+      section { padding: 74px 0; }
+      .sec-head { text-align: center; max-width: 640px; margin: 0 auto 46px; }
+      .sec-head h2 { font-size: clamp(27px, 4vw, 40px); letter-spacing: -0.02em; margin: 0 0 12px; }
+      .sec-head p { color: var(--dim); margin: 0; }
+
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(266px, 1fr)); gap: 18px; }
+      .card { background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--hair); border-radius: var(--radius);
+        padding: 26px; transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
+      .card:hover { border-color: rgba(240,169,43,0.4); transform: translateY(-4px); box-shadow: 0 20px 40px rgba(0,0,0,0.35); }
+      .card .ic { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--amber-soft);
+        color: var(--amber); margin-bottom: 16px; transition: transform .25s ease; }
+      .card:hover .ic { transform: scale(1.08) rotate(-4deg); }
+      .card .ic svg { width: 22px; height: 22px; }
+      .card h3 { margin: 0 0 8px; font-size: 17px; letter-spacing: -0.01em; }
+      .card p { margin: 0; color: var(--dim); font-size: 14.5px; }
+      .card em { color: var(--text); font-style: normal; }
+
+      /* Two apps */
+      .apps { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+      @media (max-width: 720px) { .apps { grid-template-columns: 1fr; } }
+      .app { background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--hair); border-radius: var(--radius);
+        padding: 30px; display: flex; flex-direction: column; }
+      .app .btn { margin-top: auto; align-self: flex-start; }
+      .app-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+      .app-head .badge { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; background: var(--amber-soft); color: var(--amber); }
+      .app-head .badge svg { width: 24px; height: 24px; }
+      .app .tag { font-family: var(--mono); font-size: 11px; color: var(--amber); letter-spacing: 0.09em; text-transform: uppercase; }
+      .app h3 { margin: 2px 0 0; font-size: 22px; letter-spacing: -0.02em; }
+      .app ul { margin: 16px 0 22px; padding: 0; list-style: none; color: var(--dim); font-size: 14.5px; }
+      .app ul li { display: flex; gap: 10px; margin-bottom: 9px; align-items: flex-start; }
+      .app ul li svg { width: 16px; height: 16px; color: var(--amber); flex: none; margin-top: 3px; }
+
+      /* Platform strip */
+      .plats { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 32px; }
+      .plat { display: inline-flex; align-items: center; gap: 9px; padding: 11px 16px; border: 1px solid var(--hair);
+        border-radius: 11px; background: var(--panel); color: var(--dim); font-size: 14px; font-weight: 500; transition: border-color .15s, color .15s; }
+      .plat:hover { border-color: rgba(240,169,43,0.4); color: var(--text); }
+      .plat svg { width: 18px; height: 18px; }
+
+      /* Steps */
+      .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+      @media (max-width: 720px) { .steps { grid-template-columns: 1fr; } }
+      .step { background: var(--panel); border: 1px solid var(--hair); border-radius: var(--radius); padding: 26px; position: relative; overflow: hidden; }
+      .step .n { font-family: var(--mono); color: var(--amber); font-size: 34px; font-weight: 700; opacity: 0.18; position: absolute; top: 12px; right: 18px; }
+      .step h3 { margin: 4px 0 6px; font-size: 17px; } .step p { margin: 0; color: var(--dim); font-size: 14px; }
+
+      footer { border-top: 1px solid var(--hair); padding: 40px 0 64px; color: var(--dim); font-size: 14px; margin-top: 30px; }
+      .foot-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+      .foot-links { display: flex; gap: 20px; } .foot-links a { color: var(--dim); } .foot-links a:hover { color: var(--text); }
+
+      /* Sticky nav with blur-on-scroll */
+      .navbar { position: sticky; top: 0; z-index: 30; border-bottom: 1px solid transparent;
+        transition: background .25s ease, border-color .25s ease, box-shadow .25s ease; }
+      .navbar.scrolled { background: rgba(11, 13, 15, 0.72); backdrop-filter: saturate(160%) blur(14px);
+        border-bottom-color: var(--hair); }
+
+      /* Supported cameras */
+      .cam-wrap { background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--hair);
+        border-radius: var(--radius); padding: 32px; }
+      .cam-tier + .cam-tier { margin-top: 26px; padding-top: 26px; border-top: 1px solid var(--hair); }
+      .cam-label { display: inline-flex; align-items: center; gap: 9px; font-family: var(--mono); font-size: 12px;
+        letter-spacing: 0.06em; text-transform: uppercase; color: var(--amber); margin-bottom: 16px; }
+      .cam-label svg { width: 17px; height: 17px; }
+      .cam-label.muted { color: var(--dim); }
+      .chips { display: flex; flex-wrap: wrap; gap: 10px; }
+      .chip { padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(240, 169, 43, 0.3); background: var(--amber-soft);
+        color: var(--text); font-size: 13.5px; font-weight: 600; font-family: var(--mono);
+        transition: transform .15s ease, border-color .15s ease, background .15s ease; }
+      .chip:hover { transform: translateY(-2px); border-color: var(--amber); }
+      .chip.dim { border-color: var(--hair); background: rgba(255, 255, 255, 0.03); color: var(--dim); font-weight: 500; }
+      .chip.dim:hover { color: var(--text); border-color: rgba(240, 169, 43, 0.35); }
+      .cam-note { margin: 24px 0 0; color: var(--dim); font-size: 13.5px; }
+
+      .reveal > * { will-change: transform, opacity; }
+      @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+    </style>
+  </head>
+  <body>
+    <!-- Loader: aperture draws itself in, then wipes away -->
+    <div id="loader">
+      <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+        <circle class="ap" cx="12" cy="12" r="10" />
+        <path class="ap" d="m14.31 8 5.74 9.94" /><path class="ap" d="M9.69 8h11.48" /><path class="ap" d="m7.38 12 5.74-9.94" />
+        <path class="ap" d="M9.69 16 3.95 6.06" /><path class="ap" d="M14.31 16H2.83" /><path class="ap" d="m16.62 12-5.74 9.94" />
+      </svg>
+    </div>
+
+    <div class="bg" aria-hidden="true">
+      <div class="blob a" data-parallax="0.12"></div>
+      <div class="blob b" data-parallax="0.20"></div>
+      <div class="blob c" data-parallax="0.16"></div>
+      <div class="grid-lines" data-parallax="0.05"></div>
+    </div>
+
+    <header class="navbar" id="navbar">
+      <div class="wrap">
+        <nav>
+          <span class="brand">
+            <svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="m14.31 8 5.74 9.94M9.69 8h11.48m-13.79 4 5.74-9.94M9.69 16 3.95 6.06M14.31 16H2.83m13.79-4-5.74 9.94" /></svg>
+            Aero<span class="amber">Shutter</span>
+          </span>
+          <div class="nav-links">
+            <a href="#features">Features</a><a href="#cameras">Cameras</a><a href="#apps">Apps</a><a href="#start">Get started</a>
+            <a href="https://github.com/subhashraveendran/aero-shutter">GitHub</a>
+          </div>
+        </nav>
+      </div>
+    </header>
+
+    <header class="hero wrap">
+      <span class="kicker"><span class="dot"></span>PTP/IP · No cable · No vendor app</span>
+      <h1><span class="word">Pull</span> <span class="word">photos</span> <span class="word">off</span> <span class="word">your</span> <span class="word amber">Wi-Fi</span> <span class="word amber">Nikon</span><br /><span class="word">straight</span> <span class="word">to</span> <span class="word">your</span> <span class="word">device</span></h1>
+      <p class="lede">AeroShutter connects to Wi-Fi-enabled Nikon cameras — most D-series DSLRs and Z mirrorless — over their native PTP/IP protocol and streams your shots down fast. A click-first terminal app and an iOS &amp; Android companion; no USB cable, no clunky manufacturer software.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/subhashraveendran/aero-shutter/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5" /><path d="M12 15V3" /></svg> Download</a>
+        <a class="btn btn-ghost" href="#start">Get started</a>
+        <a class="btn btn-ghost" href="https://github.com/subhashraveendran/aero-shutter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 15.09 8.26 22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg> Star on GitHub</a>
+      </div>
+
+      <p class="hero-cams">Tuned for <b>D5300</b> · <b>D5500</b> · <b>D5600</b> · <b>D7200</b> · <b>D500</b> · <b>D750</b> · <b>D850</b> · <b>Z 6</b> · <b>Z 7</b> <a href="#cameras">and more →</a></p>
+
+      <div class="term">
+        <div class="term-bar"><i></i><i></i><i></i></div>
+        <div class="scanline"></div>
+        <pre><span class="g">● connected</span>  NIKON D5300      batt 78%  ·  wifi 192.168.1.1  ·  <span class="count" data-to="214">0</span> files
+<span class="d">──────────────────────────────────────────────────────────</span>
+ Files · filter: new (12)              Preview
+ ▸ ✓ NEF DSC_0214.NEF  24.1 MB          ╭────────────────────╮
+     JPG DSC_0213.JPG   8.4 MB          │                    │
+     NEF DSC_0212.NEF  24.3 MB ✓        │     (thumbnail)    │
+     MOV DSC_0211.MOV 182.0 MB ✓        │                    │
+     JPG DSC_0210.JPG   7.9 MB ✓        ╰────────────────────╯
+<span class="d">──────────────────────────────────────────────────────────</span>
+ <span class="g">importing DSC_0214.NEF (3/12)</span>
+ <span class="bar-fill" id="bar">░░░░░░░░░░░░░░░░░░░░░░░░</span>  <span class="count" data-to="9" data-suffix=".0">0</span> MB/s · 9 left · eta 41s</pre>
+      </div>
+    </header>
+
+    <section id="features" class="wrap">
+      <div class="sec-head">
+        <h2>Built for speed and reliability</h2>
+        <p>A ground-up PTP/IP implementation, tuned for the realities of camera Wi-Fi.</p>
+      </div>
+      <div class="grid reveal">
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" /></svg></div><h3>Fast, resumable transfer</h3><p>Streams to disk in 4 MiB chunks over an enlarged TCP window. Interrupted downloads resume where they stopped; memory stays flat on any file size.</p></div>
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2" /><path d="M4.93 19.07a10 10 0 0 1 0-14.14M7.76 16.24a6 6 0 0 1 0-8.49M16.24 7.76a6 6 0 0 1 0 8.49M19.07 4.93a10 10 0 0 1 0 14.14" /></svg></div><h3>Native PTP/IP</h3><p>Speaks the camera's own ISO 15740 protocol on TCP port 15740 — dual command/event sockets, the full handshake, and transactions. No vendor SDK.</p></div>
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" /><path d="M8 16H3v5" /></svg></div><h3>Rock-solid connection</h3><p>App-level keep-alive, instant disconnect detection, and automatic reconnect with backoff keep the link up through idle periods and Wi-Fi hiccups.</p></div>
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" /><circle cx="12" cy="13" r="3" /></svg></div><h3>Instant auto-import</h3><p>Reacts to the camera's live <em>ObjectAdded</em> events — new shots land on your device the moment you take them, plus the camera's "Send to smart device" queue.</p></div>
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.6-3.6a2 2 0 0 0-2.8 0L4 21" /></svg></div><h3>Thumbnails in your terminal</h3><p>Inline JPEG previews via the Kitty / iTerm2 graphics protocols, with an ANSI half-block fallback so previews work in every color terminal.</p></div>
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14a9 3 0 0 0 18 0V5" /><path d="M3 12a9 3 0 0 0 18 0" /></svg></div><h3>Smart, deduped library</h3><p>Imports organize by capture date and are recorded in SQLite, so re-imports skip existing files instantly. Filter by new, RAW, JPEG, or a selection.</p></div>
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg></div><h3>Keeps you online</h3><p>On mobile, the camera socket binds to Wi-Fi while your phone keeps cellular data — no all-or-nothing Wi-Fi takeover. On desktop, any second interface works.</p></div>
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 13v8" /><path d="m8 17 4 4 4-4" /><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 4 16.25" /></svg></div><h3>Live over-the-air updates</h3><p>The mobile app updates itself over the air from GitHub Releases — self-hosted, zero-cost, with automatic rollback safety.</p></div>
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="14" height="11" rx="2" /><path d="M2 17h14" /><rect x="17" y="8" width="5" height="13" rx="1" /></svg></div><h3>Cross-platform</h3><p>A single static Go binary for macOS, Linux and Windows, and a Capacitor app for iOS &amp; Android. Try the whole mobile flow in your browser, no camera needed.</p></div>
+      </div>
+    </section>
+
+    <section id="apps" class="wrap">
+      <div class="sec-head">
+        <h2>Two apps, one protocol core</h2>
+        <p>Pick the terminal for raw speed, or the mobile app for on-the-go control.</p>
+      </div>
+      <div class="apps reveal">
+        <div class="app">
+          <div class="app-head">
+            <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="18" rx="2" /><path d="m6 8 4 4-4 4" /><path d="M12 16h6" /></svg></span>
+            <div><span class="tag">Terminal</span><h3>aero-shutter</h3></div>
+          </div>
+          <ul>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>Click-first TUI in the spirit of lazygit &amp; btop — everything clickable, keys optional</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>Inline thumbnail previews right in the terminal</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>Watch mode + auto-import as you shoot</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>Multi-camera discovery and switching</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>Pure Go, single static binary, no CGO</li>
+          </ul>
+          <a class="btn btn-ghost" href="https://github.com/subhashraveendran/aero-shutter/releases/latest">Download binary →</a>
+        </div>
+        <div class="app">
+          <div class="app-head">
+            <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="3" /><path d="M12 18h.01" /></svg></span>
+            <div><span class="tag">iOS &amp; Android</span><h3>AeroShutter Mobile</h3></div>
+          </div>
+          <ul>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>A "darkroom instrument" design with a one-tap connect flow</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>Join the camera's Wi-Fi from inside the app</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>Gallery, full-screen viewer, and remote capture</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>Keeps mobile-data internet alive while connected</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>Live over-the-air updates</li>
+          </ul>
+          <a class="btn btn-ghost" href="https://github.com/subhashraveendran/aero-shutter/releases/latest">Get the app →</a>
+        </div>
+      </div>
+
+      <div class="plats reveal">
+        <span class="plat"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.36 12.9c.02 2.3 2 3.06 2.05 3.08-.02.05-.32 1.09-1.05 2.16-.63.93-1.29 1.85-2.33 1.87-1.02.02-1.35-.6-2.51-.6s-1.53.58-2.5.62c-1 .04-1.76-1-2.4-1.92-1.3-1.89-2.3-5.34-.96-7.67.66-1.16 1.85-1.9 3.14-1.91 1-.02 1.94.67 2.55.67s1.76-.83 2.96-.71c.5.02 1.92.2 2.83 1.53-.07.05-1.69.99-1.67 2.79M14.6 6.9c.54-.66.9-1.57.8-2.48-.78.03-1.72.52-2.28 1.17-.5.58-.94 1.5-.82 2.39.87.07 1.76-.44 2.3-1.08" /></svg>macOS</span>
+        <span class="plat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 16V9a7 7 0 0 1 14 0v7" /><path d="M4 16h16a1 1 0 0 1 1 1 3 3 0 0 1-3 3H6a3 3 0 0 1-3-3 1 1 0 0 1 1-1Z" /><path d="m7 6-1-2m11 2 1-2M9 10h.01M15 10h.01" /></svg>Android</span>
+        <span class="plat"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z" /></svg>Windows</span>
+        <span class="plat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3a3 3 0 0 1 6 0c0 2 1 3 1 6 0 2 2 4 2 6a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3c0-2 2-4 2-6 0-3 1-4 1-6Z" /><path d="M10 9h.01M14 9h.01M10 13c1 1 3 1 4 0" /></svg>Linux</span>
+      </div>
+    </section>
+
+    <section id="cameras" class="wrap">
+      <div class="sec-head">
+        <h2>Works with your Nikon</h2>
+        <p>Most Wi-Fi Nikon D-series DSLRs and Z mirrorless work out of the box. Popular bodies get tuned profiles; the wider family that Nikon's Wireless Mobile Utility covers connects through a generic PTP/IP profile.</p>
+      </div>
+      <div class="cam-wrap reveal">
+        <div class="cam-tier">
+          <span class="cam-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" /><circle cx="12" cy="13" r="3" /></svg> Tuned profiles</span>
+          <div class="chips">
+            <span class="chip">D5300</span><span class="chip">D5500</span><span class="chip">D5600</span><span class="chip">D7100</span>
+            <span class="chip">D7200</span><span class="chip">D500</span><span class="chip">D750</span><span class="chip">D850</span>
+            <span class="chip">Z 50</span><span class="chip">Z 6</span><span class="chip">Z 7</span>
+          </div>
+        </div>
+        <div class="cam-tier">
+          <span class="cam-label muted"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M8 12h8M12 8v8" /></svg> Also connects — the Wireless Mobile Utility family</span>
+          <div class="chips">
+            <span class="chip dim">D3200</span><span class="chip dim">D3300</span><span class="chip dim">D610</span><span class="chip dim">D810</span>
+            <span class="chip dim">Df</span><span class="chip dim">Nikon 1 J3</span><span class="chip dim">Nikon 1 S1</span><span class="chip dim">Nikon 1 AW1</span>
+            <span class="chip dim">Coolpix A</span><span class="chip dim">Coolpix P340</span><span class="chip dim">Coolpix P900</span><span class="chip dim">Coolpix S9700</span>
+            <span class="chip dim">+ WU-1a / WU-1b bodies</span>
+          </div>
+        </div>
+        <p class="cam-note">Any camera that speaks PTP/IP over its Wi-Fi — the same protocol WMU uses — connects through the generic profile; the tuned bodies get model-specific thumbnails, chunk sizes and remote-control support.</p>
+      </div>
+    </section>
+
+    <section id="start" class="wrap">
+      <div class="sec-head">
+        <h2>Connect in three steps</h2>
+        <p>Zero-config — you never type an IP address.</p>
+      </div>
+      <div class="steps reveal">
+        <div class="step"><span class="n">01</span><h3>Turn on camera Wi-Fi</h3><p>On the D5300: MENU → Setup → Wi-Fi → Enable. The camera becomes its own access point.</p></div>
+        <div class="step"><span class="n">02</span><h3>Join the network</h3><p>Tap "Connect to camera" in the app (or join "Nikon_WU2_…" in your phone's Wi-Fi settings).</p></div>
+        <div class="step"><span class="n">03</span><h3>It connects itself</h3><p>AeroShutter auto-detects the camera and opens a session — no address to enter.</p></div>
+      </div>
+    </section>
+
+    <footer>
+      <div class="wrap foot-row">
+        <span>MIT licensed · Built for photographers who hate cables.</span>
+        <div class="foot-links">
+          <a href="https://github.com/subhashraveendran/aero-shutter">GitHub</a>
+          <a href="https://github.com/subhashraveendran/aero-shutter/releases/latest">Releases</a>
+          <a href="#cameras">Cameras</a>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Motion via anime.js v4 (https://animejs.com). ES module from CDN; if it
+         fails, everything is fully visible by default (nothing pre-hidden). -->
+    <script type="module">
+      import { animate, stagger, svg, createTimeline, onScroll, utils } from 'https://cdn.jsdelivr.net/npm/animejs/+esm';
+
+      const easeOut = 'out(3)';
+
+      /* ---- Intro loader: draw the aperture, spin, then wipe away, then hero ---- */
+      const intro = createTimeline({ defaults: { ease: easeOut } });
+      intro
+        .add(svg.createDrawable('#loader .ap'), { draw: ['0 0', '0 1', '1 1'], duration: 900, delay: stagger(60), ease: 'inOutQuad' })
+        .add('#loader .mark', { rotate: 120, scale: [1, 1.15], duration: 700 }, '-=450')
+        .add('#loader', {
+          opacity: [1, 0], duration: 550,
+          onComplete: () => { const l = document.getElementById('loader'); l.classList.add('done'); l.style.display = 'none'; },
+        }, '+=120')
+        // Hero choreography
+        .add('.kicker', { opacity: [0, 1], translateY: [16, 0], duration: 600 }, '-=200')
+        .add('h1 .word', { opacity: [0, 1], translateY: [28, 0], rotateX: [-40, 0], duration: 720, delay: stagger(55) }, '-=350')
+        .add('.lede', { opacity: [0, 1], translateY: [18, 0], duration: 650 }, '-=350')
+        .add('.cta .btn', { opacity: [0, 1], translateY: [16, 0], scale: [0.94, 1], duration: 560, delay: stagger(90) }, '-=350')
+        .add('.hero-cams', { opacity: [0, 1], translateY: [12, 0], duration: 520 }, '-=250')
+        .add('.term', { opacity: [0, 1], translateY: [50, 0], scale: [0.97, 1], duration: 850 }, '-=300')
+        .add('.scanline', { opacity: [0, 1, 0], translateY: [0, 380], duration: 1100, ease: 'inOutQuad' }, '-=500');
+
+      /* ---- Count-up numbers in the terminal ---- */
+      utils.$('.count').forEach((el) => {
+        const to = parseFloat(el.dataset.to);
+        const suffix = el.dataset.suffix || '';
+        const obj = { v: 0 };
+        animate(obj, {
+          v: to, duration: 1600, delay: 900, ease: 'out(4)',
+          onUpdate: () => { el.textContent = suffix ? obj.v.toFixed(1) : Math.round(obj.v); },
+        });
+      });
+
+      /* ---- Live progress bar fill loop ---- */
+      const bar = document.getElementById('bar');
+      if (bar) {
+        const total = 24;
+        const st = { p: 0 };
+        animate(st, {
+          p: total, duration: 2600, delay: 1200, loop: true, alternate: true, ease: 'inOutSine',
+          onUpdate: () => { const n = Math.round(st.p); bar.textContent = '█'.repeat(n) + '░'.repeat(total - n); },
+        });
+      }
+
+      /* ---- Pulsing "connected" dot ---- */
+      animate('.kicker .dot', { boxShadow: ['0 0 0 0 rgba(240,169,43,0.5)', '0 0 0 8px rgba(240,169,43,0)'], duration: 1600, loop: true, ease: 'out(2)' });
+
+      /* ---- Scroll-reveal groups (IntersectionObserver → anime, flash-free) ---- */
+      const revealGroup = (group) => animate(group.querySelectorAll(':scope > *'), {
+        opacity: [0, 1], translateY: [30, 0], scale: [0.96, 1], rotateZ: [-1.5, 0],
+        delay: stagger(75), duration: 720, ease: easeOut,
+      });
+      if ('IntersectionObserver' in window) {
+        const io = new IntersectionObserver((entries, obs) => {
+          for (const e of entries) if (e.isIntersecting) { revealGroup(e.target); obs.unobserve(e.target); }
+        }, { threshold: 0.12 });
+        document.querySelectorAll('.reveal').forEach((g) => io.observe(g));
+        // Section headings drift up on entry
+        const io2 = new IntersectionObserver((entries, obs) => {
+          for (const e of entries) if (e.isIntersecting) {
+            animate(e.target.children, { opacity: [0, 1], translateY: [24, 0], delay: stagger(90), duration: 700, ease: easeOut });
+            obs.unobserve(e.target);
+          }
+        }, { threshold: 0.4 });
+        document.querySelectorAll('.sec-head').forEach((h) => io2.observe(h));
+      }
+
+      /* ---- Parallax: background layers + hero terminal, driven by scroll ---- */
+      const layers = utils.$('[data-parallax]');
+      const term = document.querySelector('.term');
+      const navbar = document.getElementById('navbar');
+      const onScrollParallax = () => {
+        const y = window.scrollY;
+        for (const el of layers) el.style.transform = `translate3d(0, ${y * parseFloat(el.dataset.parallax)}px, 0)`;
+        if (term) term.style.transform = `translate3d(0, ${y * -0.06}px, 0)`;
+        if (navbar) navbar.classList.toggle('scrolled', y > 24);
+      };
+      window.addEventListener('scroll', onScrollParallax, { passive: true });
+      onScrollParallax();
+
+      /* ---- Mouse parallax on the hero blobs for extra depth ---- */
+      window.addEventListener('mousemove', (e) => {
+        const dx = (e.clientX / window.innerWidth - 0.5);
+        const dy = (e.clientY / window.innerHeight - 0.5);
+        animate('.blob.a', { translateX: dx * 30, translateY: dy * 20, duration: 900, ease: 'out(3)' });
+        animate('.blob.b', { translateX: dx * -24, translateY: dy * 18, duration: 1100, ease: 'out(3)' });
+      });
+
+      /* ---- Floating primary CTA ---- */
+      animate('.btn-primary', { translateY: [0, -4, 0], duration: 2600, loop: true, delay: 1600, ease: 'inOutSine' });
+
+      /* ---- Brand logo slow rotation ---- */
+      animate('.brand .logo', { rotate: 360, duration: 22000, loop: true, ease: 'linear' });
+    </script>
+  </body>
+</html>

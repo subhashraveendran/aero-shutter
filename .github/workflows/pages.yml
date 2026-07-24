@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'mobile/**'
+      - 'docs/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -37,20 +38,29 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
+      # Build the browser demo under /aero-shutter/demo/ so the marketing
+      # landing page (docs/index.html) can own the site root.
+      - name: Build demo
         run: npm run build
         env:
-          VITE_BASE: /aero-shutter/
+          VITE_BASE: /aero-shutter/demo/
 
-      - name: Add SPA fallback and disable Jekyll
+      # Assemble the published site: landing page at the root, live demo at
+      # /demo/. The app is a single-URL, state-driven SPA (no client-side URL
+      # routing), so a per-directory 404 fallback keeps deep links working.
+      - name: Assemble site (landing + demo)
         run: |
-          cp dist/index.html dist/404.html
-          touch dist/.nojekyll
+          rm -rf ../_site && mkdir -p ../_site/demo
+          cp -r dist/* ../_site/demo/
+          cp ../docs/index.html ../_site/index.html
+          cp ../_site/demo/index.html ../_site/demo/404.html
+          cp ../docs/index.html ../_site/404.html
+          touch ../_site/.nojekyll
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: mobile/dist
+          path: _site
 
   deploy:
     name: Deploy demo
