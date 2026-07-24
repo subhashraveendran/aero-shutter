@@ -145,25 +145,28 @@ jobs:
       # leading "v". minNativeVersion is read from mobile/ota-min-native.txt if
       # present, else defaults to this tag's version. URL uses the stable
       # latest-download path so it never needs editing between releases.
+      # The commit message is passed via env (NOT spliced into the script) and
+      # the JSON is built with jq, so backticks / quotes / parentheses / newlines
+      # in the message can never break the shell or corrupt the JSON.
       - name: Generate ota.json
+        env:
+          TAG: ${{ github.ref_name }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
-          TAG="${{ github.ref_name }}"
           VERSION="${TAG#v}"
           if [ -f ota-min-native.txt ]; then
             MIN_NATIVE="$(head -n1 ota-min-native.txt | tr -d '[:space:]')"
           else
             MIN_NATIVE="$VERSION"
           fi
-          NOTES="${{ github.event.head_commit.message }}"
-          if [ -z "$NOTES" ]; then NOTES="AeroShutter $TAG"; fi
-          cat > ota.json <<EOF
-          {
-            "version": "$VERSION",
-            "url": "https://github.com/subhashraveendran/aero-shutter/releases/latest/download/web-bundle.zip",
-            "notes": "$NOTES",
-            "minNativeVersion": "$MIN_NATIVE"
-          }
-          EOF
+          NOTES="${COMMIT_MSG:-AeroShutter $TAG}"
+          jq -n \
+            --arg version "$VERSION" \
+            --arg url "https://github.com/subhashraveendran/aero-shutter/releases/latest/download/web-bundle.zip" \
+            --arg notes "$NOTES" \
+            --arg minNativeVersion "$MIN_NATIVE" \
+            '{version: $version, url: $url, notes: $notes, minNativeVersion: $minNativeVersion}' \
+            > ota.json
           cat ota.json
 
       # Upsert onto the SAME release as the APK + binaries (action-gh-release
