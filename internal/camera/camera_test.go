@@ -17,7 +17,7 @@ func TestProfileForModel(t *testing.T) {
 	}{
 		{"NIKON D5300", "Nikon D5300"},
 		{"nikon d5300", "Nikon D5300"},
-		{"NIKON D5200", "Nikon D5200"},
+		{"NIKON D5200", "Generic PTP/IP camera"}, // D5200 is not supported — falls back to generic
 		{"NIKON D5500", "Nikon D5500"},
 		{"NIKON D5600", "Nikon D5600"},
 		{"NIKON D7100", "Nikon D7100"},

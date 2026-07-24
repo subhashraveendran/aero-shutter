@@ -80,7 +80,6 @@ var GenericProfile = Profile{
 // name; Z-series matches use the spaced form ("Z 6") that Nikon reports in
 // DeviceInfo.
 var Profiles = []Profile{
-	nikonWiFiProfile("Nikon D5200", "D5200"),
 	D5300Profile,
 	nikonWiFiProfile("Nikon D5500", "D5500"),
 	nikonWiFiProfile("Nikon D5600", "D5600"),
