@@ -305,6 +305,31 @@
 .advanced-toggle.open .chev { transform: rotate(180deg); }
 .advanced-toggle.open { color: var(--amber-bright); }
 
+/* Simplified connect screen: one hint line + a single collapsible options panel
+   so the default view is just the primary "Connect to camera" button. */
+.connect-hint {
+  max-width: 30ch;
+  margin: var(--s-2) auto var(--s-1);
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.connect-manual-link .chev {
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.connect-manual-link .chev.open { transform: rotate(180deg); }
+.connect-help {
+  margin-top: var(--s-2);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--hairline, rgba(255, 255, 255, 0.08));
+  animation: fade-in var(--dur-fast) var(--ease-out);
+}
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* Contact-sheet numbered how-to */
 .steps {
   display: flex;

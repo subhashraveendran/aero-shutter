@@ -27,8 +27,10 @@ export function ConnectScreen() {
   const savedIp = useStore((s) => s.settings.cameraIp);
 
   const [phase, setPhase] = useState<Phase>('idle');
-  const [advanced, setAdvanced] = useState(false);
-  const [wifiOpen, setWifiOpen] = useState(false);
+  // A SINGLE progressive-disclosure panel holds every technical option (Wi-Fi
+  // name/password + manual IP). It stays hidden so the default screen is just
+  // one button; it opens on demand or automatically when a connect fails.
+  const [helpOpen, setHelpOpen] = useState(false);
   const [ssid, setSsid] = useState(NIKON_SSID_PREFIX);
   const [password, setPassword] = useState('');
   const [ip, setIp] = useState(savedIp);
@@ -61,10 +63,10 @@ export function ConnectScreen() {
   }, [connecting, connectError]);
 
   // Auto-detect on first mount — call connect() with NO argument so the store
-  // can auto-discover the camera. Manual IP is an escape hatch, not the default.
-  // In browser demo mode the mock connects instantly, which would skip this
-  // screen entirely; there we wait for the explicit "Try demo mode" button so
-  // the auto-detect experience stays visible.
+  // can auto-discover the camera. The technical options are an escape hatch,
+  // not the default. In browser demo mode the mock connects instantly, which
+  // would skip this screen entirely; there we wait for the explicit "Try demo
+  // mode" button so the auto-detect experience stays visible.
   useEffect(() => {
     if (started.current || demo) return;
     started.current = true;
@@ -72,19 +74,16 @@ export function ConnectScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // If auto-detect failed, surface the advanced field automatically.
+  // If auto-detect failed, reveal the options panel so the fix is one tap away.
   useEffect(() => {
-    if (connectError) setAdvanced(true);
-  }, [connectError]);
+    if (connectError || wifiError) setHelpOpen(true);
+  }, [connectError, wifiError]);
 
   const busy = connecting || joiningWifi;
   const detectedIp = ip.trim() && valid ? ip.trim() : savedIp || '192.168.1.1';
 
-  // Enable the join button only for a plausible SSID (prefix alone is fine —
-  // the app will scan for a match — but an empty field is not).
   const ssidTrimmed = ssid.trim();
   const canJoin = ssidTrimmed.length > 0;
-
   const doJoin = () => void joinCameraWifi(ssidTrimmed || NIKON_SSID_PREFIX, password);
 
   let label: string;
@@ -144,182 +143,121 @@ export function ConnectScreen() {
         </p>
       )}
 
+      {/* One plain-language line so a first-timer knows the single prerequisite. */}
+      {!busy && !wifiSsid && (
+        <p className="connect-hint">
+          Turn on Wi-Fi in your camera’s menu, then tap below — AeroShutter finds it for you.
+        </p>
+      )}
+
       {!busy && (
         <div className="connect-actions">
-          {/* Primary in-app path: join the camera's Wi-Fi without leaving the
-              app. In demo mode this simulates a join and proceeds to the mock
-              gallery so the whole flow is demoable in the browser. */}
-          {
-            <>
-              <button
-                className="btn btn-primary btn-block join-wifi-btn"
-                // Tries the Nikon prefix directly (scan + join). If a password
-                // or exact SSID is needed, the fields are one tap away below.
-                onClick={doJoin}
-              >
-                <WifiIcon size={18} />
-                Join camera Wi-Fi
-              </button>
-              <button
-                className="btn btn-ghost btn-block connect-manual-link"
-                onClick={() => setWifiOpen((o) => !o)}
-                aria-expanded={wifiOpen}
-              >
-                {wifiOpen ? 'Hide Wi-Fi details' : 'Enter Wi-Fi name / password'}
-              </button>
-              {wifiOpen && (
-                <div className="wifi-field">
-                  <div className="ip-label">Network name (SSID)</div>
-                  <div className="ip-wrap">
-                    <span className="lead">WiFi</span>
-                    <input
-                      value={ssid}
-                      onChange={(e) => setSsid(e.target.value)}
-                      placeholder="Nikon_WU2_XXXXXX"
-                      aria-label="Camera Wi-Fi SSID"
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                    />
-                  </div>
-                  <div className="ip-label" style={{ marginTop: 'var(--s-3)' }}>
-                    Password (leave blank if open)
-                  </div>
-                  <div className="ip-wrap">
-                    <span className="lead">Key</span>
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="optional"
-                      aria-label="Camera Wi-Fi password"
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                    />
-                  </div>
-                  <button
-                    className="btn btn-primary btn-block"
-                    style={{ marginTop: 'var(--s-3)' }}
-                    disabled={!canJoin}
-                    onClick={doJoin}
-                  >
-                    Join & connect
-                  </button>
-                </div>
-              )}
-              {wifiError && <p className="error-line">{wifiError}</p>}
-            </>
-          }
-          {connectError && (
-            <>
-              <button className="btn btn-primary btn-block" onClick={() => void connect()}>
-                Retry auto-detect
-              </button>
-              <button
-                className="btn btn-ghost btn-block"
-                onClick={() => {
-                  setAdvanced(true);
-                  requestAnimationFrame(() =>
-                    document.getElementById('camera-ip-input')?.focus(),
-                  );
-                }}
-              >
-                Enter IP manually
-              </button>
-            </>
-          )}
+          {/* THE one primary action. It joins the camera's "Nikon_WU2_…" network
+              and auto-connects. Everything else is tucked into "Trouble
+              connecting?" below so this screen stays a single clear choice. */}
+          <button className="btn btn-primary btn-block join-wifi-btn" onClick={doJoin}>
+            <WifiIcon size={18} />
+            {connectError || wifiError ? 'Try again' : 'Connect to camera'}
+          </button>
+
           {demo && (
             <button className="btn btn-ghost btn-block" onClick={() => void enterDemo()}>
               Try demo mode
             </button>
           )}
-          {connectError && <p className="error-line">{connectError}</p>}
-          {!connectError && (
-            <button
-              className="btn btn-ghost btn-block connect-manual-link"
-              onClick={() => {
-                setAdvanced((a) => !a);
-                if (!advanced) {
-                  requestAnimationFrame(() =>
-                    document.getElementById('camera-ip-input')?.focus(),
-                  );
-                }
-              }}
-            >
-              Connect manually
-            </button>
-          )}
-        </div>
-      )}
 
-      <div className="steps">
-        <div className="card step crop-marks">
-          <div className="num">01</div>
-          <div className="step-body">
-            <strong>Enable Wi-Fi on the camera</strong>
-            <span>On the D5300, open the setup menu and turn on the built-in Wi-Fi.</span>
-          </div>
-        </div>
-        <div className="card step crop-marks">
-          <div className="num">02</div>
-          <div className="step-body">
-            <strong>Tap “Join camera Wi-Fi”</strong>
-            <span>
-              The app joins “Nikon_WU2_…” for you. If it can’t, connect to it in your phone’s
-              Wi-Fi settings instead.
-            </span>
-          </div>
-        </div>
-        <div className="card step crop-marks">
-          <div className="num">03</div>
-          <div className="step-body">
-            <strong>AeroShutter connects automatically</strong>
-            <span>It finds the camera on the network. Enter an address only if it can’t.</span>
-          </div>
-        </div>
-      </div>
-
-      <button
-        className={`advanced-toggle ${advanced ? 'open' : ''}`}
-        onClick={() => setAdvanced((a) => !a)}
-        aria-expanded={advanced}
-      >
-        <ChevronDown size={16} className="chev" />
-        Advanced — enter IP manually
-      </button>
-
-      {advanced && (
-        <div className="ip-field">
-          <div className="ip-label">Camera Address</div>
-          <div className={`ip-wrap ${focus ? 'focus' : ''} ${ip && !valid ? 'invalid' : ''}`}>
-            <span className="lead">IP</span>
-            <input
-              id="camera-ip-input"
-              inputMode="decimal"
-              value={ip}
-              onChange={(e) => setIp(e.target.value)}
-              onFocus={() => setFocus(true)}
-              onBlur={() => setFocus(false)}
-              placeholder="192.168.1.1"
-              aria-label="Camera IP address"
-            />
-            {valid && <span className="valid-dot" aria-hidden="true" />}
-          </div>
+          {/* Single disclosure for ALL technical options. Hidden by default,
+              auto-opened on error. */}
           <button
-            className="btn btn-primary btn-block"
-            style={{ marginTop: 'var(--s-3)' }}
-            disabled={busy || !valid}
-            onClick={() => void connect(ip.trim())}
+            className="btn btn-ghost btn-block connect-manual-link"
+            onClick={() => setHelpOpen((o) => !o)}
+            aria-expanded={helpOpen}
           >
-            {busy ? 'Connecting…' : 'Connect to this address'}
+            <ChevronDown size={15} className={`chev ${helpOpen ? 'open' : ''}`} />
+            Trouble connecting?
           </button>
+
+          {helpOpen && (
+            <div className="connect-help">
+              {(connectError || wifiError) && (
+                <p className="error-line">{connectError || wifiError}</p>
+              )}
+
+              {/* Option A — enter the camera's exact Wi-Fi name / password. */}
+              <div className="wifi-field">
+                <div className="ip-label">Camera Wi-Fi name</div>
+                <div className="ip-wrap">
+                  <span className="lead">WiFi</span>
+                  <input
+                    value={ssid}
+                    onChange={(e) => setSsid(e.target.value)}
+                    placeholder="Nikon_WU2_XXXXXX"
+                    aria-label="Camera Wi-Fi SSID"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                  />
+                </div>
+                <div className="ip-label" style={{ marginTop: 'var(--s-3)' }}>
+                  Password (leave blank if none)
+                </div>
+                <div className="ip-wrap">
+                  <span className="lead">Key</span>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="optional"
+                    aria-label="Camera Wi-Fi password"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                  />
+                </div>
+                <button
+                  className="btn btn-primary btn-block"
+                  style={{ marginTop: 'var(--s-3)' }}
+                  disabled={!canJoin}
+                  onClick={doJoin}
+                >
+                  Join &amp; connect
+                </button>
+              </div>
+
+              {/* Option B — already on the camera's Wi-Fi? enter its address. */}
+              <div className="ip-field" style={{ marginTop: 'var(--s-4)' }}>
+                <div className="ip-label">Already joined? Enter the camera’s address</div>
+                <div className={`ip-wrap ${focus ? 'focus' : ''} ${ip && !valid ? 'invalid' : ''}`}>
+                  <span className="lead">IP</span>
+                  <input
+                    id="camera-ip-input"
+                    inputMode="decimal"
+                    value={ip}
+                    onChange={(e) => setIp(e.target.value)}
+                    onFocus={() => setFocus(true)}
+                    onBlur={() => setFocus(false)}
+                    placeholder="192.168.1.1"
+                    aria-label="Camera IP address"
+                  />
+                  {valid && <span className="valid-dot" aria-hidden="true" />}
+                </div>
+                <button
+                  className="btn btn-ghost btn-block"
+                  style={{ marginTop: 'var(--s-3)' }}
+                  disabled={busy || !valid}
+                  onClick={() => void connect(ip.trim())}
+                >
+                  {busy ? 'Connecting…' : 'Connect to this address'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       <div className="wifi-note">
         <span className="glyph" aria-hidden="true" />
         <span>
-          While joined to the camera’s Wi-Fi, your phone has no internet access. That’s expected —
-          reconnect to your normal network when you’re done.
+          While you’re on the camera’s Wi-Fi, your phone has no internet — that’s normal. It comes
+          back when you disconnect.
         </span>
       </div>
     </div>
