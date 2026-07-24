@@ -95,7 +95,22 @@ async function getUpdater(): Promise<UpdaterPlugin | null> {
   if (!isNative()) return null;
   try {
     const mod = await import('@capgo/capacitor-updater');
-    return mod.CapacitorUpdater as unknown as UpdaterPlugin;
+    const p = mod.CapacitorUpdater as unknown as UpdaterPlugin;
+    // IMPORTANT: do NOT return the raw plugin object. Capacitor plugins are
+    // Proxies that forward EVERY property access to native — including `.then`.
+    // Returning that thenable from an async function makes the runtime try to
+    // adopt it (call `.then()`), which the bridge rejects with
+    // "CapacitorUpdater.then() is not implemented on android". That rejection
+    // breaks markAppReady() and, critically, applyUpdate() — so OTA silently
+    // never applies. Wrap the methods in a plain (non-thenable) object instead.
+    return {
+      notifyAppReady: () => p.notifyAppReady(),
+      current: () => p.current(),
+      download: (opts) => p.download(opts),
+      next: (opts) => p.next(opts),
+      reload: () => p.reload(),
+      addListener: (event, cb) => p.addListener(event, cb),
+    };
   } catch {
     return null;
   }
